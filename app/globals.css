@@ -24,3 +24,13 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/* ✅ ADD THIS FOR MOBILE TEXT COLOR FIX */
+input, textarea, select {
+  color: black !important;
+}
+
+input::placeholder, textarea::placeholder {
+  color: #6b7280 !important;
+  opacity: 1;
+}

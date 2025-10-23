@@ -68,7 +68,7 @@ export default function Dashboard() {
         <div className="max-w-7xl mx-auto px-4 py-4 sm:px-6 lg:px-8 flex justify-between items-center">
           <h1 className="text-2xl font-bold text-gray-800">Maintenance Dashboard</h1>
           <div className="flex items-center gap-4">
-            <span className="text-gray-600">Welcome, {user?.email}</span>
+            
             <button
               onClick={handleLogout}
               className="bg-red-500 text-white px-4 py-2 rounded hover:bg-red-600"
@@ -148,20 +148,19 @@ export default function Dashboard() {
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                         {complaint.profiles?.full_name || 'Unknown'}
                       </td>
-                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-        {complaint.pdf_url ? (
-          <a 
-            href={complaint.pdf_url} 
-            target="_blank" 
-            rel="noopener noreferrer"
-            className="text-blue-600 hover:text-blue-800"
-          >
-            Download PDF
-          </a>
-        ) : (
-          <span className="text-gray-400">No PDF</span>
-        )}
-      </td>
+<td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+  {complaint.pdf_url ? (
+    <a 
+      href={complaint.pdf_url}
+      download={`Complaint-${complaint.building_name}.pdf`}
+      className="bg-blue-500 text-white px-3 py-1 rounded hover:bg-blue-600 text-sm"
+    >
+      Download PDF
+    </a>
+  ) : (
+    <span className="text-gray-400">No PDF</span>
+  )}
+</td>
                     </tr>
                   ))}
                 </tbody>
