@@ -11,11 +11,15 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true)
   const [user, setUser] = useState<any>(null)
   const router = useRouter()
+  const [openDropdown, setOpenDropdown] = useState<string | null>(null)
+  
 
   useEffect(() => {
     checkUser()
     fetchComplaints()
   }, [])
+
+
 
   const checkUser = async () => {
     const { data: { user } } = await supabase.auth.getUser()
@@ -26,27 +30,83 @@ export default function Dashboard() {
     setUser(user)
   }
 
-  const fetchComplaints = async () => {
-    try {
-      const { data, error } = await supabase
-        .from('complaints')
-        .select(`
-          *,
-          profiles:submitted_by (
-            full_name,
-            username
-          )
-        `)
-        .order('created_at', { ascending: false })
-
-      if (error) throw error
-      setComplaints(data || [])
-    } catch (error) {
-      console.error('Error fetching complaints:', error)
-    } finally {
-      setLoading(false)
-    }
+const downloadPDF = async (pdfUrl: string | undefined, fileName: string) => {
+  if (!pdfUrl) {
+    console.error('No PDF URL provided')
+    return
   }
+  
+  try {
+    const response = await fetch(pdfUrl)
+    const blob = await response.blob()
+    const url = window.URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = fileName
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    window.URL.revokeObjectURL(url)
+  } catch (error) {
+    console.error('Download failed:', error)
+    window.open(pdfUrl, '_blank')
+  }
+}
+
+// Update the fetchComplaints function to include completion_id
+const fetchComplaints = async () => {
+  try {
+    const { data, error } = await supabase
+      .from('complaints')
+      .select(`
+        *,
+        profiles:submitted_by (
+          full_name,
+          username
+        )
+      `)
+      .order('created_at', { ascending: false })
+
+    if (error) throw error
+    setComplaints(data || [])
+  } catch (error) {
+    console.error('Error fetching complaints:', error)
+  } finally {
+    setLoading(false)
+  }
+}
+
+  const handleMarkComplete = (complaintId: string) => {
+  router.push(`/completions/new?complaintId=${complaintId}`)
+}
+
+// Add this function to download completion PDF
+const downloadCompletionPDF = async (completionId: string, fileName: string) => {
+  try {
+    // First, generate or get the completion PDF URL
+    const response = await fetch('/api/completion-pdf/generate', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ completionId }),
+    })
+
+    const result = await response.json()
+
+    if (!response.ok) {
+      throw new Error(result.error || 'Failed to generate completion PDF')
+    }
+
+    // Download the generated PDF
+    await downloadPDF(result.pdfUrl, fileName)
+    setOpenDropdown(null)
+    
+  } catch (error) {
+    console.error('Completion PDF download failed:', error)
+    alert('Failed to download completion PDF')
+  }
+}
 
   const handleLogout = async () => {
     await supabase.auth.signOut()
@@ -122,48 +182,88 @@ export default function Dashboard() {
     </th>
                   </tr>
                 </thead>
-                <tbody className="bg-white divide-y divide-gray-200">
-                  {complaints.map((complaint) => (
-                    <tr key={complaint.id} className="hover:bg-gray-50">
-                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                        {complaint.building_name}
-                      </td>
-                      <td className="px-6 py-4 text-sm text-gray-500 max-w-xs truncate">
-                        {complaint.incident_description}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                        {new Date(complaint.incident_date).toLocaleDateString()}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
-                          complaint.status === 'pending' 
-                            ? 'bg-yellow-100 text-yellow-800'
-                            : complaint.status === 'in-progress'
-                            ? 'bg-blue-100 text-blue-800'
-                            : 'bg-green-100 text-green-800'
-                        }`}>
-                          {complaint.status}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                        {complaint.profiles?.full_name || 'Unknown'}
-                      </td>
-<td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-  {complaint.pdf_url ? (
-    <a 
-      href={complaint.pdf_url}
-      download={`Complaint-${complaint.building_name}.pdf`}
-      className="bg-blue-500 text-white px-3 py-1 rounded hover:bg-blue-600 text-sm"
-    >
-      Download PDF
-    </a>
-  ) : (
-    <span className="text-gray-400">No PDF</span>
-  )}
-</td>
-                    </tr>
-                  ))}
-                </tbody>
+<tbody className="bg-white divide-y divide-gray-200">
+  {complaints.map((complaint) => (
+    <tr key={complaint.id} className="hover:bg-gray-50">
+      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+        {complaint.building_name}
+      </td>
+      <td className="px-6 py-4 text-sm text-gray-500 max-w-xs truncate">
+        {complaint.incident_description}
+      </td>
+      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+        {new Date(complaint.incident_date).toLocaleDateString()}
+      </td>
+      <td className="px-6 py-4 whitespace-nowrap">
+        {complaint.status === 'pending' ? (
+          <button
+            onClick={() => handleMarkComplete(complaint.id)}
+            className="bg-yellow-100 text-yellow-800 px-3 py-1 rounded-full text-xs font-semibold hover:bg-yellow-200 cursor-pointer"
+          >
+            Pending
+          </button>
+        ) : (
+          <span className="bg-green-100 text-green-800 px-3 py-1 rounded-full text-xs font-semibold">
+            Completed
+          </span>
+        )}
+      </td>
+      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+        {complaint.profiles?.full_name || 'Unknown'}
+      </td>
+      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+        {complaint.status === 'pending' ? (
+          <button
+            onClick={() => downloadPDF(complaint.pdf_url, `Complaint-${complaint.building_name}.pdf`)}
+            className="bg-blue-500 text-white px-3 py-1 rounded hover:bg-blue-600 text-sm disabled:opacity-50"
+            disabled={!complaint.pdf_url}
+          >
+            PDF Aduan
+          </button>
+        ) : (
+          <div className="relative inline-block text-left">
+            <button
+              onClick={(e) => {
+                e.stopPropagation()
+                setOpenDropdown(openDropdown === complaint.id ? null : complaint.id)
+              }}
+              className="bg-green-500 text-white px-3 py-1 rounded hover:bg-green-600 text-sm flex items-center gap-1"
+            >
+              PDF
+              <span>▼</span>
+            </button>
+            
+{openDropdown === complaint.id && (
+  <div className="absolute right-0 z-10 mt-1 w-48 origin-top-right rounded-md bg-white shadow-lg ring-1 ring-black ring-opacity-5 focus:outline-none">
+    <div className="py-1">
+      <button
+        onClick={() => {
+          downloadPDF(complaint.pdf_url, `Complaint-${complaint.building_name}.pdf`)
+          setOpenDropdown(null)
+        }}
+        className="block w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 text-left disabled:opacity-50"
+        disabled={!complaint.pdf_url}
+      >
+        PDF Aduan (Original)
+      </button>
+      <button
+        onClick={() => {
+          downloadCompletionPDF(complaint.completion_id!, `Completion-${complaint.building_name}.pdf`)
+          setOpenDropdown(null)
+        }}
+        className="block w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 text-left"
+      >
+        PDF Penyelesaian
+      </button>
+    </div>
+  </div>
+)}
+          </div>
+        )}
+      </td>
+    </tr>
+  ))}
+</tbody>
               </table>
             </div>
           )}
