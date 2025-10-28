@@ -53,6 +53,40 @@ const downloadPDF = async (pdfUrl: string | undefined, fileName: string) => {
   }
 }
 
+const handleDeleteComplaint = async (complaintId: string, status: string) => {
+  if (!confirm('Adakah anda pasti mahu padam aduan ini?')) {
+    return
+  }
+
+  try {
+    // Delete the complaint first
+    const { error } = await supabase
+      .from('complaints')
+      .delete()
+      .eq('id', complaintId)
+
+    if (error) throw error
+
+    // If it was completed, also delete the completion record
+    if (status === 'completed') {
+      // We don't even need to worry about the foreign key anymore
+      // since the complaint is already deleted
+      await supabase
+        .from('completions')
+        .delete()
+        .eq('complaint_id', complaintId) // Use complaint_id to find the completion
+    }
+
+    alert('Aduan berjaya dipadam!')
+    fetchComplaints()
+    setOpenDropdown(null)
+    
+  } catch (error) {
+    console.error('Error deleting complaint:', error)
+    alert('Gagal memadam aduan')
+  }
+}
+
 // Update the fetchComplaints function to include completion_id
 const fetchComplaints = async () => {
   try {
@@ -211,56 +245,60 @@ const downloadCompletionPDF = async (completionId: string, fileName: string) => 
       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
         {complaint.profiles?.full_name || 'Unknown'}
       </td>
-      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-        {complaint.status === 'pending' ? (
+<td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+  {/* PDF Dropdown - Available for ALL complaints */}
+  <div className="relative inline-block text-left">
+    <button
+      onClick={(e) => {
+        e.stopPropagation()
+        setOpenDropdown(openDropdown === complaint.id ? null : complaint.id)
+      }}
+      className="bg-blue-500 text-white px-3 py-1 rounded hover:bg-blue-600 text-sm flex items-center gap-1"
+    >
+      Action
+      <span>▼</span>
+    </button>
+    
+    {openDropdown === complaint.id && (
+      <div className="absolute right-0 z-10 mt-1 w-48 origin-top-right rounded-md bg-white shadow-lg ring-1 ring-black ring-opacity-5 focus:outline-none">
+        <div className="py-1">
+          {/* PDF Complaint - Always Available */}
           <button
-            onClick={() => downloadPDF(complaint.pdf_url, `Complaint-${complaint.building_name}.pdf`)}
-            className="bg-blue-500 text-white px-3 py-1 rounded hover:bg-blue-600 text-sm disabled:opacity-50"
+            onClick={() => {
+              downloadPDF(complaint.pdf_url, `Complaint-${complaint.building_name}.pdf`)
+              setOpenDropdown(null)
+            }}
+            className="block w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 text-left disabled:opacity-50"
             disabled={!complaint.pdf_url}
           >
             PDF Aduan
           </button>
-        ) : (
-          <div className="relative inline-block text-left">
+          
+          {/* PDF Completion - Only for Completed */}
+          {complaint.status === 'completed' && (
             <button
-              onClick={(e) => {
-                e.stopPropagation()
-                setOpenDropdown(openDropdown === complaint.id ? null : complaint.id)
+              onClick={() => {
+                downloadCompletionPDF(complaint.completion_id!, `Completion-${complaint.building_name}.pdf`)
+                setOpenDropdown(null)
               }}
-              className="bg-green-500 text-white px-3 py-1 rounded hover:bg-green-600 text-sm flex items-center gap-1"
+              className="block w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 text-left"
             >
-              PDF
-              <span>▼</span>
+              PDF Penyelesaian
             </button>
-            
-{openDropdown === complaint.id && (
-  <div className="absolute right-0 z-10 mt-1 w-48 origin-top-right rounded-md bg-white shadow-lg ring-1 ring-black ring-opacity-5 focus:outline-none">
-    <div className="py-1">
-      <button
-        onClick={() => {
-          downloadPDF(complaint.pdf_url, `Complaint-${complaint.building_name}.pdf`)
-          setOpenDropdown(null)
-        }}
-        className="block w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 text-left disabled:opacity-50"
-        disabled={!complaint.pdf_url}
-      >
-        PDF Aduan (Original)
-      </button>
-      <button
-        onClick={() => {
-          downloadCompletionPDF(complaint.completion_id!, `Completion-${complaint.building_name}.pdf`)
-          setOpenDropdown(null)
-        }}
-        className="block w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 text-left"
-      >
-        PDF Penyelesaian
-      </button>
-    </div>
+          )}
+          
+          {/* Delete - Always Available */}
+          <button
+            onClick={() => handleDeleteComplaint(complaint.id, complaint.status)}
+            className="block w-full px-4 py-2 text-sm text-red-600 hover:bg-red-50 text-left border-t border-gray-100 mt-1"
+          >
+            Padam Aduan
+          </button>
+        </div>
+      </div>
+    )}
   </div>
-)}
-          </div>
-        )}
-      </td>
+</td>
     </tr>
   ))}
 </tbody>
