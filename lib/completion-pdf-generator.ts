@@ -1,6 +1,156 @@
 // lib/completion-pdf-generator.ts
 import { PDFDocument, PDFPage, rgb, StandardFonts } from 'pdf-lib'
 
+// Add this function to handle completion images
+async function addCompletionImages(pdfDoc: PDFDocument, currentPage: PDFPage, completion: any, font: any, fontBold: any): Promise<void> {
+  let page = currentPage
+  const { width, height } = page.getSize()
+  let y = 750 // Start images on new page or current position
+
+  // If current page has content, start images on new page
+  if (page.getY() < 600) {
+    page = pdfDoc.addPage([600, 800])
+    y = 750
+  }
+
+  // Only add images section if there are images
+  if (!completion.completion_images || completion.completion_images.length === 0) {
+    return
+  }
+
+  page.drawText('GAMBAR PENYELESAIAN', {
+    x: 50, y, size: 14, font: fontBold, color: rgb(0.1, 0.1, 0.1),
+  })
+  y -= 40
+
+  // Image grid settings - same as complaints
+  const imagesPerRow = 2
+  const imageSize = 200
+  const spacing = 30
+  const startX = 50
+  
+  for (let i = 0; i < completion.completion_images.length; i++) {
+    const imageData = completion.completion_images[i]
+    const row = Math.floor(i / imagesPerRow)
+    const col = i % imagesPerRow
+    
+    // Check if we need a new page
+    const imageY = y - (row * (imageSize + spacing + 40)) // 40 for caption
+    
+    if (imageY - imageSize < 50) {
+      page = pdfDoc.addPage([600, 800])
+      y = 750
+      // Redraw header on new page
+      page.drawText('GAMBAR PENYELESAIAN (Sambungan)', {
+        x: 50, y, size: 14, font: fontBold, color: rgb(0.1, 0.1, 0.1),
+      })
+      y -= 40
+    }
+    
+    try {
+      const imageBytes = await fetchImage(imageData.url)
+      let image: any
+      
+      try {
+        image = await pdfDoc.embedJpg(imageBytes)
+      } catch {
+        image = await pdfDoc.embedPng(imageBytes)
+      }
+      
+      // Calculate position for this image in the grid
+      const xPos = startX + (col * (imageSize + spacing))
+      const currentY = y - (row * (imageSize + spacing + 40))
+      
+      // Scale image to fit square
+      const scaledDims = image.scaleToFit(imageSize, imageSize)
+      
+      // Center image in the square
+      const xOffset = (imageSize - scaledDims.width) / 2
+      const yOffset = (imageSize - scaledDims.height) / 2
+      
+      // Draw image with border
+      page.drawRectangle({
+        x: xPos,
+        y: currentY - imageSize,
+        width: imageSize,
+        height: imageSize,
+        borderColor: rgb(0.8, 0.8, 0.8),
+        borderWidth: 1,
+      })
+      
+      page.drawImage(image, {
+        x: xPos + xOffset,
+        y: currentY - imageSize + yOffset,
+        width: scaledDims.width,
+        height: scaledDims.height,
+      })
+      
+      // Add caption below image
+      if (imageData.caption) {
+        const captionLines = wrapText(imageData.caption, 30) // Shorter lines for captions
+        captionLines.forEach((line, lineIndex) => {
+          page.drawText(line, {
+            x: xPos,
+            y: currentY - imageSize - 15 - (lineIndex * 12),
+            size: 8,
+            font,
+            color: rgb(0.3, 0.3, 0.3),
+          })
+        })
+      }
+      
+      // Add image number
+      page.drawText(`Gambar ${i + 1}`, {
+        x: xPos,
+        y: currentY - imageSize - ((imageData.caption ? wrapText(imageData.caption, 30).length : 0) * 12) - 25,
+        size: 7,
+        font,
+        color: rgb(0.4, 0.4, 0.4),
+      })
+      
+    } catch (error) {
+      console.error('Error processing completion image:', imageData.url, error)
+      // Draw placeholder for failed images
+      const xPos = startX + (col * (imageSize + spacing))
+      const currentY = y - (row * (imageSize + spacing + 40))
+      
+      page.drawRectangle({
+        x: xPos,
+        y: currentY - imageSize,
+        width: imageSize,
+        height: imageSize,
+        borderColor: rgb(0.8, 0.8, 0.8),
+        borderWidth: 1,
+        color: rgb(0.95, 0.95, 0.95),
+      })
+      
+      page.drawText('Gagal Muat', {
+        x: xPos + imageSize/2 - 20,
+        y: currentY - imageSize/2 - 5,
+        size: 10,
+        font,
+        color: rgb(0.6, 0.6, 0.6),
+      })
+      
+      page.drawText(`Gambar ${i + 1}`, {
+        x: xPos,
+        y: currentY - imageSize - 15,
+        size: 8,
+        font,
+        color: rgb(0.4, 0.4, 0.4),
+      })
+    }
+  }
+}
+
+// Add this helper function for fetching images
+async function fetchImage(url: string): Promise<Uint8Array> {
+  const response = await fetch(url)
+  if (!response.ok) throw new Error(`Failed to fetch image: ${response.status}`)
+  const arrayBuffer = await response.arrayBuffer()
+  return new Uint8Array(arrayBuffer)
+}
+
 export async function generateCompletionPDF(completion: any): Promise<Uint8Array> {
   const pdfDoc = await PDFDocument.create()
   const font = await pdfDoc.embedFont(StandardFonts.Helvetica)
@@ -149,6 +299,9 @@ page.drawText('Tandatangan PIC', {
   font,
   color: rgb(0.4, 0.4, 0.4),
 })
+
+  // ✅ ADD THIS LINE - Call the image function after signature
+  await addCompletionImages(pdfDoc, page, completion, font, fontBold)
 
   // Footer
   page.drawText(

@@ -2,12 +2,16 @@
 import { supabase } from './supabase'
 // lib/image-upload.ts
 import { compressImage, shouldCompressImage } from './image-compression'
+import { ImageWithCaption } from '@/Types'
 
-export async function uploadComplaintImages(complaintId: string, images: File[]): Promise<string[]> {
-  const imageUrls: string[] = []
+export async function uploadComplaintImages(complaintId: string, images: File[], captions: string[] = []): Promise<ImageWithCaption[]> {
+  const imageData: ImageWithCaption[] = []
   
-  for (const image of images) {
+  for (let i = 0; i < images.length; i++) {
     try {
+      const image = images[i]
+      const caption = captions[i] || ''
+      
       let imageToUpload = image
       
       // Compress image if it's large
@@ -17,7 +21,7 @@ export async function uploadComplaintImages(complaintId: string, images: File[])
       }
 
       // Create unique filename
-      const fileExt = 'jpg' // Always use jpg after compression
+      const fileExt = 'jpg'
       const fileName = `${complaintId}/${Date.now()}-${Math.random().toString(36).substring(2)}.${fileExt}`
       
       // Upload image
@@ -35,15 +39,59 @@ export async function uploadComplaintImages(complaintId: string, images: File[])
         .from('complaint-images')
         .getPublicUrl(fileName)
       
-      imageUrls.push(publicUrl)
+      imageData.push({
+        url: publicUrl,
+        caption: caption
+      })
       
     } catch (error) {
-      console.error('Error processing image:', image.name, error)
-      // Continue with next image even if one fails
+      console.error('Error processing image:', images[i].name, error)
     }
   }
   
-  return imageUrls
+  return imageData
+}
+
+// Add a new function for completion images
+export async function uploadCompletionImages(completionId: string, images: File[], captions: string[] = []): Promise<ImageWithCaption[]> {
+  const imageData: ImageWithCaption[] = []
+  
+  for (let i = 0; i < images.length; i++) {
+    try {
+      const image = images[i]
+      const caption = captions[i] || ''
+      
+      let imageToUpload = image
+      
+      if (shouldCompressImage(image)) {
+        console.log('🔄 Compressing completion image:', image.name)
+        imageToUpload = await compressImage(image)
+      }
+
+      const fileExt = 'jpg'
+      const fileName = `completions/${completionId}/${Date.now()}-${Math.random().toString(36).substring(2)}.${fileExt}`
+      
+      const { data, error } = await supabase.storage
+        .from('complaint-images') // Using same bucket, but different folder
+        .upload(fileName, imageToUpload)
+      
+      if (error) throw error
+      
+      const { data: { publicUrl } } = supabase.storage
+        .from('complaint-images')
+        .getPublicUrl(fileName)
+      
+      imageData.push({
+        url: publicUrl,
+        caption: caption
+      })
+      
+    } catch (error) {
+      console.error('Error processing completion image:', images[i].name, error)
+    }
+  }
+  
+  return imageData
 }
 
 export function validateImages(files: File[]): string | null {
@@ -64,3 +112,4 @@ export function validateImages(files: File[]): string | null {
   
   return null
 }
+

@@ -15,10 +15,10 @@ export async function generateComplaintPDF(complaint: any): Promise<Uint8Array> 
   y = addIncidentDescription(currentPage, y, complaint, font, fontBold)
   y = addSolutionSuggestion(currentPage, y, complaint, font, fontBold)
   
-  // Add images with proper layout
-  if (complaint.image_urls && complaint.image_urls.length > 0) {
-    await addImagesSection(pdfDoc, currentPage, complaint.image_urls, font, fontBold)
-  }
+// Add images with proper layout
+if (complaint.image_urls && complaint.image_urls.length > 0) {
+  await addComplaintImages(pdfDoc, currentPage, complaint, font, fontBold)
+}
   
   addFooter(pdfDoc, font)
   
@@ -112,34 +112,41 @@ function addSolutionSuggestion(page: PDFPage, y: number, complaint: any, font: a
   return y - 20
 }
 
-async function addImagesSection(pdfDoc: PDFDocument, currentPage: PDFPage, imageUrls: string[], font: any, fontBold: any): Promise<void> {
+// Add this function to handle complaint images with captions
+async function addComplaintImages(pdfDoc: PDFDocument, currentPage: PDFPage, complaint: any, font: any, fontBold: any): Promise<void> {
   let page = currentPage
+  const { width, height } = page.getSize()
   let y = 750 // Start images on new page or current position
-  
+
   // If current page has content, start images on new page
-  if (currentPage.getY() < 600) {
+  if (page.getY() < 600) {
     page = pdfDoc.addPage([600, 800])
     y = 750
   }
-  
+
+  // Only add images section if there are images
+  if (!complaint.image_urls || complaint.image_urls.length === 0) {
+    return
+  }
+
   page.drawText('GAMBAR KEJADIAN', {
     x: 50, y, size: 14, font: fontBold, color: rgb(0.1, 0.1, 0.1),
   })
   y -= 40
 
-  // Image grid settings
+  // Image grid settings - same as completion PDF
   const imagesPerRow = 2
-  const imageSize = 200 // Square size
+  const imageSize = 200
   const spacing = 30
   const startX = 50
   
-  for (let i = 0; i < imageUrls.length; i++) {
-    const imageUrl = imageUrls[i]
+  for (let i = 0; i < complaint.image_urls.length; i++) {
+    const imageData = complaint.image_urls[i]
     const row = Math.floor(i / imagesPerRow)
     const col = i % imagesPerRow
     
     // Check if we need a new page
-    const imageY = y - (row * (imageSize + spacing + 20)) // 20 for caption
+    const imageY = y - (row * (imageSize + spacing + 40)) // 40 for caption
     
     if (imageY - imageSize < 50) {
       page = pdfDoc.addPage([600, 800])
@@ -152,7 +159,7 @@ async function addImagesSection(pdfDoc: PDFDocument, currentPage: PDFPage, image
     }
     
     try {
-      const imageBytes = await fetchImage(imageUrl)
+      const imageBytes = await fetchImage(imageData.url)
       let image: any
       
       try {
@@ -163,7 +170,7 @@ async function addImagesSection(pdfDoc: PDFDocument, currentPage: PDFPage, image
       
       // Calculate position for this image in the grid
       const xPos = startX + (col * (imageSize + spacing))
-      const currentY = y - (row * (imageSize + spacing + 20))
+      const currentY = y - (row * (imageSize + spacing + 40))
       
       // Scale image to fit square
       const scaledDims = image.scaleToFit(imageSize, imageSize)
@@ -189,20 +196,34 @@ async function addImagesSection(pdfDoc: PDFDocument, currentPage: PDFPage, image
         height: scaledDims.height,
       })
       
+      // Add caption below image
+      if (imageData.caption) {
+        const captionLines = wrapText(imageData.caption, 30) // Shorter lines for captions
+        captionLines.forEach((line, lineIndex) => {
+          page.drawText(line, {
+            x: xPos,
+            y: currentY - imageSize - 15 - (lineIndex * 12),
+            size: 8,
+            font,
+            color: rgb(0.3, 0.3, 0.3),
+          })
+        })
+      }
+      
       // Add image number
       page.drawText(`Gambar ${i + 1}`, {
         x: xPos,
-        y: currentY - imageSize - 15,
-        size: 8,
+        y: currentY - imageSize - ((imageData.caption ? wrapText(imageData.caption, 30).length : 0) * 12) - 25,
+        size: 7,
         font,
         color: rgb(0.4, 0.4, 0.4),
       })
       
     } catch (error) {
-      console.error('Error processing image:', imageUrl, error)
+      console.error('Error processing complaint image:', imageData.url, error)
       // Draw placeholder for failed images
       const xPos = startX + (col * (imageSize + spacing))
-      const currentY = y - (row * (imageSize + spacing + 20))
+      const currentY = y - (row * (imageSize + spacing + 40))
       
       page.drawRectangle({
         x: xPos,
@@ -262,8 +283,32 @@ function wrapText(text: string, maxLength: number): string[] {
 }
 
 async function fetchImage(url: string): Promise<Uint8Array> {
-  const response = await fetch(url)
-  if (!response.ok) throw new Error(`Failed to fetch image: ${response.status}`)
-  const arrayBuffer = await response.arrayBuffer()
-  return new Uint8Array(arrayBuffer)
+  try {
+    console.log('🔄 Fetching image:', url)
+    
+    // Use AbortController for timeout instead
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 10000) // 10 second timeout
+    
+    const response = await fetch(url, {
+      signal: controller.signal,
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (compatible; Maintenance-App/1.0)'
+      }
+    })
+    
+    clearTimeout(timeout)
+    
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`)
+    }
+    
+    const arrayBuffer = await response.arrayBuffer()
+    console.log('✅ Image fetched successfully, size:', arrayBuffer.byteLength)
+    return new Uint8Array(arrayBuffer)
+    
+  } catch (error: any) {
+    console.error('❌ Failed to fetch image:', url, error.message)
+    throw new Error(`Failed to fetch image: ${error.message}`)
+  }
 }

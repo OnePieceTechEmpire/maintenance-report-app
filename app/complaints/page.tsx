@@ -5,6 +5,7 @@ import { useState, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { uploadComplaintImages, validateImages } from '@/lib/image-upload'
+import { ImageWithCaption } from '@/Types'
 
 export default function ComplaintForm() {
   const [formData, setFormData] = useState({
@@ -22,6 +23,8 @@ export default function ComplaintForm() {
   const [uploadProgress, setUploadProgress] = useState(0)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const router = useRouter()
+  // Add these states to your complaint form
+const [imageCaptions, setImageCaptions] = useState<string[]>([])
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target
@@ -31,7 +34,6 @@ export default function ComplaintForm() {
 const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
   const files = Array.from(e.target.files || [])
   
-  // Validate images
   const validationError = validateImages([...images, ...files])
   if (validationError) {
     alert(validationError)
@@ -40,23 +42,19 @@ const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
 
   setImages(prev => [...prev, ...files])
   
-  // Create previews with error handling
+  // Create previews with captions
   files.forEach(file => {
     const reader = new FileReader()
-    
     reader.onload = () => {
       if (reader.result) {
         setImagePreviews(prev => [...prev, reader.result as string])
+        setImageCaptions(prev => [...prev, '']) // Initialize with empty caption
       }
     }
-    
     reader.onerror = () => {
       console.error('Failed to read file:', file.name)
-      alert(`Failed to load image: ${file.name}`)
-      // Remove the file that failed to load
       setImages(prev => prev.filter(f => f !== file))
     }
-    
     reader.readAsDataURL(file)
   })
 
@@ -66,10 +64,19 @@ const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
   }
 }
 
-  const removeImage = (index: number) => {
-    setImages(prev => prev.filter((_, i) => i !== index))
-    setImagePreviews(prev => prev.filter((_, i) => i !== index))
-  }
+const handleCaptionChange = (index: number, caption: string) => {
+  setImageCaptions(prev => {
+    const newCaptions = [...prev]
+    newCaptions[index] = caption
+    return newCaptions
+  })
+}
+
+const removeImage = (index: number) => {
+  setImages(prev => prev.filter((_, i) => i !== index))
+  setImagePreviews(prev => prev.filter((_, i) => i !== index))
+  setImageCaptions(prev => prev.filter((_, i) => i !== index))
+}
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -104,28 +111,22 @@ const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
       console.log('Complaint submitted with ID:', complaintId)
 
     // Upload images if any
-    let imageUrls: string[] = []
-    if (images.length > 0) {
-      setUploadProgress(30)
-      
-      // Show compression status
-      if (images.some(img => img.size > 1024 * 1024)) {
-        alert('Compressing large images... This may take a moment.')
-      }
-      
-      imageUrls = await uploadComplaintImages(data[0].id, images)
-      setUploadProgress(70)
-      
-      // Update complaint with image URLs
-      const { error: updateError } = await supabase
-        .from('complaints')
-        .update({ image_urls: imageUrls })
-        .eq('id', data[0].id)
+let imageUrls: ImageWithCaption[] = []
+if (images.length > 0) {
+  setUploadProgress(30)
+  imageUrls = await uploadComplaintImages(data[0].id, images, imageCaptions) // Pass captions
+  setUploadProgress(70)
+  
+  // Update complaint with image URLs and captions
+  const { error: updateError } = await supabase
+    .from('complaints')
+    .update({ image_urls: imageUrls })
+    .eq('id', data[0].id)
 
-      if (updateError) {
-        console.error('Failed to update complaint with images:', updateError)
-      }
-    }
+  if (updateError) {
+    console.error('Failed to update complaint with images:', updateError)
+  }
+}
 
       setUploadProgress(90)
       
@@ -304,43 +305,52 @@ const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
               >
                 Pilih Gambar
               </label>
-              <p className="text-sm text-gray-500">
-                atau seret dan lepas gambar di sini
-              </p>
+
               <p className="text-xs text-gray-400 mt-1">
-                PNG, JPG, GIF sehingga 5MB. Maksimum 5 gambar.
+                PNG, JPG sehingga 5MB. Maksimum 5 gambar.
               </p>
             </div>
             
-            {/* Image Previews */}
-            {imagePreviews.length > 0 && (
-              <div className="mt-4">
-                <h3 className="text-sm font-medium text-gray-700 mb-2">
-                  Gambar Dipilih ({imagePreviews.length}/5)
-                </h3>
-                <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
-                  {imagePreviews.map((preview, index) => (
-                    <div key={index} className="relative group">
-                      <img 
-                        src={preview} 
-                        alt={`Preview ${index + 1}`}
-                        className="w-full h-24 object-cover rounded border-2 border-gray-200"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => removeImage(index)}
-                        className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full w-6 h-6 text-xs opacity-0 group-hover:opacity-100 transition-opacity"
-                      >
-                        ×
-                      </button>
-                      <div className="absolute bottom-0 left-0 right-0 bg-black bg-opacity-50 text-white text-xs p-1 truncate">
-                        {images[index]?.name}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
+{/* Image previews with captions */}
+{imagePreviews.length > 0 && (
+  <div className="mt-4">
+    <h3 className="text-sm font-medium text-gray-700 mb-2">
+      Gambar Dipilih ({imagePreviews.length}/5)
+    </h3>
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      {imagePreviews.map((preview, index) => (
+        <div key={index} className="border rounded-lg p-3 bg-gray-50">
+          <div className="relative">
+            <img 
+              src={preview} 
+              alt={`Preview ${index + 1}`}
+              className="w-full h-48 object-cover rounded border"
+            />
+            <button
+              type="button"
+              onClick={() => removeImage(index)}
+              className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full w-6 h-6 text-xs"
+            >
+              ×
+            </button>
+          </div>
+          <div className="mt-2">
+            <label className="block text-xs text-gray-600 mb-1">
+              Keterangan Gambar {index + 1}:
+            </label>
+            <input
+              type="text"
+              value={imageCaptions[index] || ''}
+              onChange={(e) => handleCaptionChange(index, e.target.value)}
+              placeholder="e.g., Keadaan semasa, lokasi tepat, etc."
+              className="w-full px-2 py-1 text-sm border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+            />
+          </div>
+        </div>
+      ))}
+    </div>
+  </div>
+)}
           </div>
 
           <div>

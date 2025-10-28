@@ -1,6 +1,7 @@
 // app/login/page.tsx
 'use client'
 
+import Image from 'next/image'
 import { useState } from 'react'
 import { signIn, signUp } from '@/lib/auth'
 import { useRouter } from 'next/navigation'
@@ -48,9 +49,17 @@ export default function Login() {
   return (
     <div className="min-h-screen bg-gray-50 flex items-center justify-center">
       <div className="max-w-md w-full bg-white p-8 rounded-lg shadow-md">
-        <h2 className="text-2xl font-bold text-gray-800 mb-6">
-          {isSignUp ? 'Staff Registration' : 'Staff Login'}
-        </h2>
+                {/* ✅ Add your image here */}
+        <Image
+          src="/images/login.png" // Put your image in /public/logo.png
+          alt="login logo"
+          width={70}
+          height={64}
+          className="mx-auto mb-4"
+        />
+<h2 className="text-2xl font-bold text-gray-800 mb-6 text-center">
+  {isSignUp ? 'Staff Registration' : 'Staff Login'}
+</h2>
         
         {error && (
           <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">

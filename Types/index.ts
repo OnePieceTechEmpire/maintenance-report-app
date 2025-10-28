@@ -20,12 +20,12 @@ export interface Complaint {
   assigned_to?: string;
   submitted_by: string;
   created_at: string;
-    completion_id?: string; // Add this
-  pdf_url?: string; // ✅ Make sure this line exists
+  pdf_url?: string;
+  completion_id?: string;
+  image_urls?: ImageWithCaption[]; // Change from string[] to ImageWithCaption[]
   profiles?: {
     full_name: string;
     username: string;
-    image_urls?: string[]; // Add this line
   };
 }
 
@@ -37,7 +37,8 @@ export interface ComplaintFormData {
   reporter_name: string;
   reporter_phone: string;
   solution_suggestion: string;
-  images?: File[]; // Add this line
+    images?: File[];
+  imageCaptions?: string[]; // Add this
 }
 
 export interface Completion {
@@ -60,6 +61,7 @@ export interface Completion {
   complaints?: Complaint;
   profiles?: {
     full_name: string;
+    completion_images?: ImageWithCaption[]; // Add this
   };
 }
 
@@ -75,4 +77,11 @@ export interface CompletionFormData {
   quantity: string;
   materials_equipment: string;
   worker_count: string;
+  completionImages?: File[]; // Files to upload
+  imageCaptions?: string[]; // Captions for each image
+}
+
+export interface ImageWithCaption {
+  url: string;
+  caption: string;
 }

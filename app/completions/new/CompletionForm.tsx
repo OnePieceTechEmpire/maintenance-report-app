@@ -1,9 +1,11 @@
-// app/completions/new/page.tsx
+// app/completions/new/CompletionForm.tsx
 'use client'
 
 import { useState, useEffect } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
+import { uploadCompletionImages, validateImages } from '@/lib/image-upload'
+import { ImageWithCaption } from '@/Types'
 
 export default function CompletionForm() {
   const [formData, setFormData] = useState({
@@ -22,6 +24,10 @@ export default function CompletionForm() {
   const [complaint, setComplaint] = useState<any>(null)
   const [loading, setLoading] = useState(false)
   const [signature, setSignature] = useState('')
+  const [completionImages, setCompletionImages] = useState<File[]>([])
+  const [completionImagePreviews, setCompletionImagePreviews] = useState<string[]>([])
+  const [completionImageCaptions, setCompletionImageCaptions] = useState<string[]>([])
+  
   const router = useRouter()
   const searchParams = useSearchParams()
   const complaintId = searchParams.get('complaintId')
@@ -44,8 +50,8 @@ export default function CompletionForm() {
       // Pre-fill some fields from complaint
       setFormData(prev => ({
         ...prev,
-        work_location: ``,
-        work_title: ``,
+        work_location: data.incident_location,
+        work_title: `Penyelenggaraan - ${data.building_name}`,
         completion_date: new Date().toISOString().split('T')[0]
       }))
     }
@@ -61,28 +67,72 @@ export default function CompletionForm() {
   }
 
   const generateCompletionPDF = async (completionId: string) => {
-  try {
-    const response = await fetch('/api/completion-pdf/generate', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ completionId }),
-    })
+    try {
+      const response = await fetch('/api/completion-pdf/generate', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ completionId }),
+      })
 
-    const result = await response.json()
+      const result = await response.json()
 
-    if (!response.ok) {
-      throw new Error(result.error || `HTTP error! status: ${response.status}`)
+      if (!response.ok) {
+        throw new Error(result.error || `HTTP error! status: ${response.status}`)
+      }
+
+      console.log('Completion PDF generated successfully:', result.pdfUrl)
+      return result.pdfUrl
+    } catch (error: any) {
+      console.error('Completion PDF generation error:', error)
+    }
+  }
+
+  const handleCompletionImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || [])
+    
+    const validationError = validateImages([...completionImages, ...files])
+    if (validationError) {
+      alert(validationError)
+      return
     }
 
-    console.log('Completion PDF generated successfully:', result.pdfUrl)
-    return result.pdfUrl
-  } catch (error: any) {
-    console.error('Completion PDF generation error:', error)
-    // Don't block form submission if PDF fails
+    setCompletionImages(prev => [...prev, ...files])
+    
+    // Create previews
+    files.forEach(file => {
+      const reader = new FileReader()
+      reader.onload = () => {
+        if (reader.result) {
+          setCompletionImagePreviews(prev => [...prev, reader.result as string])
+          setCompletionImageCaptions(prev => [...prev, '']) // Initialize with empty caption
+        }
+      }
+      reader.onerror = () => {
+        console.error('Failed to read file:', file.name)
+        setCompletionImages(prev => prev.filter(f => f !== file))
+      }
+      reader.readAsDataURL(file)
+    })
+
+    // Reset file input
+    e.target.value = ''
   }
-}
+
+  const removeCompletionImage = (index: number) => {
+    setCompletionImages(prev => prev.filter((_, i) => i !== index))
+    setCompletionImagePreviews(prev => prev.filter((_, i) => i !== index))
+    setCompletionImageCaptions(prev => prev.filter((_, i) => i !== index))
+  }
+
+  const handleCaptionChange = (index: number, caption: string) => {
+    setCompletionImageCaptions(prev => {
+      const newCaptions = [...prev]
+      newCaptions[index] = caption
+      return newCaptions
+    })
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -128,11 +178,28 @@ export default function CompletionForm() {
 
       if (error) throw error
 
-      // Generate completion PDF
-await generateCompletionPDF(completion[0].id)
+      // Upload completion images with captions
+      let completionImageData: ImageWithCaption[] = []
+      if (completionImages.length > 0) {
+        completionImageData = await uploadCompletionImages(
+          completion[0].id, 
+          completionImages, 
+          completionImageCaptions
+        )
+      }
+
+      // Update completion with images
+      const { error: updateCompletionError } = await supabase
+        .from('completions')
+        .update({ 
+          completion_images: completionImageData
+        })
+        .eq('id', completion[0].id)
+
+      if (updateCompletionError) throw updateCompletionError
 
       // Update complaint status and link completion
-      const { error: updateError } = await supabase
+      const { error: updateComplaintError } = await supabase
         .from('complaints')
         .update({ 
           status: 'completed',
@@ -140,7 +207,10 @@ await generateCompletionPDF(completion[0].id)
         })
         .eq('id', complaintId)
 
-      if (updateError) throw updateError
+      if (updateComplaintError) throw updateComplaintError
+
+      // Generate completion PDF
+      await generateCompletionPDF(completion[0].id)
 
       alert('Work completion recorded successfully!')
       router.push('/dashboard')
@@ -333,6 +403,73 @@ await generateCompletionPDF(completion[0].id)
                 placeholder="e.g., Cat, paku, berus, etc."
               />
             </div>
+          </div>
+
+                  {/* NEW: Completion Images Section */}
+          <div>
+            <label className="block text-gray-700 text-sm font-bold mb-2">
+              Gambar Selepas Pembaikan (Maksimum 5)
+            </label>
+            <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center">
+              <input
+                type="file"
+                multiple
+                accept="image/*"
+                onChange={handleCompletionImageUpload}
+                className="hidden"
+                id="completion-image-upload"
+              />
+              <label
+                htmlFor="completion-image-upload"
+                className="cursor-pointer bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600 inline-block mb-2"
+              >
+                Pilih Gambar
+              </label>
+              <p className="text-xs text-gray-400 mt-1">
+                PNG, JPG, GIF sehingga 5MB. Maksimum 5 gambar.
+              </p>
+            </div>
+            
+            {/* Completion Image Previews with Captions */}
+            {completionImagePreviews.length > 0 && (
+              <div className="mt-4">
+                <h3 className="text-sm font-medium text-gray-700 mb-2">
+                  Gambar Pembaikan ({completionImagePreviews.length}/5)
+                </h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {completionImagePreviews.map((preview, index) => (
+                    <div key={index} className="border rounded-lg p-3 bg-gray-50">
+                      <div className="relative">
+                        <img 
+                          src={preview} 
+                          alt={`Completion preview ${index + 1}`}
+                          className="w-full h-48 object-cover rounded border"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => removeCompletionImage(index)}
+                          className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full w-6 h-6 text-xs"
+                        >
+                          ×
+                        </button>
+                      </div>
+                      <div className="mt-2">
+                        <label className="block text-xs text-gray-600 mb-1">
+                          Keterangan Gambar {index + 1}:
+                        </label>
+                        <input
+                          type="text"
+                          value={completionImageCaptions[index] || ''}
+                          onChange={(e) => handleCaptionChange(index, e.target.value)}
+                          placeholder="e.g., Selepas pembaikan, keadaan semasa, etc."
+                          className="w-full px-2 py-1 text-sm border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
 
           <div>
