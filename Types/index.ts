@@ -84,4 +84,57 @@ export interface CompletionFormData {
 export interface ImageWithCaption {
   url: string;
   caption: string;
+    storage_path?: string  // Add this (optional)
+  type?: string         // Add this (optional)
+}
+
+// Add these to your existing Types.ts file
+export interface DraftImageInfo {
+  file_name: string
+  storage_path: string
+  caption: string
+  preview: string
+  size: number
+  type: string
+}
+
+export interface ComplaintDraft {
+  id: string
+  user_id: string
+  form_data: {
+    building_name: string
+    incident_location: string
+    incident_description: string
+    incident_date: string
+    reporter_name: string
+    reporter_phone: string
+    solution_suggestion: string
+  }
+  uploaded_images: DraftImageInfo[]
+  created_at: string
+  updated_at: string
+}
+
+
+
+// Add to your existing Types
+export interface Company {
+  id: string
+  name: string
+  code: string
+  created_at: string
+  updated_at: string
+}
+
+export interface UserProfile {
+  id: string
+  username: string | null
+  full_name: string | null
+  role: string
+  company_id: string | null
+  email: string | null
+  status: string
+  created_at: string
+  updated_at: string
+  companies?: Company
 }

@@ -12,23 +12,216 @@ export default function Dashboard() {
   const [user, setUser] = useState<any>(null)
   const router = useRouter()
   const [openDropdown, setOpenDropdown] = useState<string | null>(null)
+  // Add this state to your Dashboard component
+const [drafts, setDrafts] = useState<any[]>([])
+const [completionDrafts, setCompletionDrafts] = useState<any[]>([]) // Add this
+const [activeTab, setActiveTab] = useState<'complaints' | 'drafts' | 'completion-drafts'>('complaints') // Update this
+
+
+
   
 
-  useEffect(() => {
-    checkUser()
-    fetchComplaints()
-  }, [])
-
-
-
-  const checkUser = async () => {
+useEffect(() => {
+  checkUser()
+  fetchComplaints()
+  fetchDrafts()
+  fetchCompletionDrafts() // Add this
+}, [])
+  
+// Add this function to fetch drafts
+const fetchDrafts = async () => {
+  try {
     const { data: { user } } = await supabase.auth.getUser()
-    if (!user) {
-      router.push('/login')
-      return
-    }
-    setUser(user)
+    if (!user) return
+
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('company_id')
+      .eq('id', user.id)
+      .single()
+
+          // SIMPLE NULL CHECK
+    if (!profile?.company_id) return
+
+    const { data, error } = await supabase
+      .from('complaint_drafts')
+      .select('*')
+      .eq('user_id', user.id)
+      //.eq('company_id', profile.company_id) // ⬅️ ADD THIS FILTER
+      .order('updated_at', { ascending: false })
+
+    if (error) throw error
+    setDrafts(data || [])
+  } catch (error) {
+    console.error('Error fetching drafts:', error)
   }
+}
+
+// Add this function to fetch completion drafts
+const fetchCompletionDrafts = async () => {
+  try {
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return
+
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('company_id')
+      .eq('id', user.id)
+      .single()
+
+          // SIMPLE NULL CHECK
+    if (!profile?.company_id) return
+
+    const { data, error } = await supabase
+      .from('completion_drafts')
+      .select(`
+        *,
+        complaints (
+          building_name,
+          incident_description
+        )
+      `)
+      .eq('user_id', user.id)
+      //.eq('company_id', profile.company_id) // ⬅️ ADD THIS FILTER
+      .order('updated_at', { ascending: false })
+
+    if (error) throw error
+    setCompletionDrafts(data || [])
+  } catch (error) {
+    console.error('Error fetching completion drafts:', error)
+  }
+}
+
+// Add this function to load completion draft
+const loadCompletionDraft = (draftId: string) => {
+  router.push(`/completions/new?complaintId=${completionDrafts.find(d => d.id === draftId)?.complaint_id}&draftId=${draftId}`)
+}
+
+// Add this function to delete completion draft
+const deleteCompletionDraft = async (draftId: string) => {
+  if (!confirm('Adakah anda pasti mahu padam draf penyelesaian ini?')) {
+    return
+  }
+
+  try {
+    // Get draft to access image info
+    const { data: draft } = await supabase
+      .from('completion_drafts')
+      .select('uploaded_images')
+      .eq('id', draftId)
+      .single()
+
+    // Delete images from storage if they exist
+    if (draft?.uploaded_images && draft.uploaded_images.length > 0) {
+      const pathsToDelete = draft.uploaded_images.map((img: any) => img.storage_path)
+      await supabase.storage
+        .from('draft-images')
+        .remove(pathsToDelete)
+    }
+
+    // Delete the draft record
+    const { error } = await supabase
+      .from('completion_drafts')
+      .delete()
+      .eq('id', draftId)
+
+    if (error) throw error
+
+    alert('Draf penyelesaian berjaya dipadam!')
+    fetchCompletionDrafts() // Refresh the list
+    
+  } catch (error) {
+    console.error('Error deleting completion draft:', error)
+    alert('Gagal memadam draf penyelesaian')
+  }
+}
+
+
+
+
+
+
+// Add this function to load a draft into the complaint form
+const loadDraftForEditing = (draftId: string) => {
+  router.push(`/complaints?draftId=${draftId}`)
+}
+
+// Update the deleteDraft function in dashboard
+const deleteDraft = async (draftId: string) => {
+  if (!confirm('Adakah anda pasti mahu padam draf ini?')) {
+    return
+  }
+
+  try {
+    // Get draft to access image info
+    const { data: draft, error: fetchError } = await supabase
+      .from('complaint_drafts')
+      .select('uploaded_images')
+      .eq('id', draftId)
+      .single()
+
+    if (fetchError) throw fetchError
+
+    // Delete images from storage if they exist
+    if (draft?.uploaded_images && draft.uploaded_images.length > 0) {
+      const response = await fetch('/api/drafts/delete-images', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ images: draft.uploaded_images })
+      })
+      
+      if (!response.ok) {
+        throw new Error('Failed to delete draft images')
+      }
+    }
+
+    // Delete the draft record
+    const { error: deleteError } = await supabase
+      .from('complaint_drafts')
+      .delete()
+      .eq('id', draftId)
+
+    if (deleteError) throw deleteError
+
+    alert('Draf berjaya dipadam!')
+    fetchDrafts()
+    
+  } catch (error) {
+    console.error('Error deleting draft:', error)
+    alert('Gagal memadam draf')
+  }
+}
+
+
+
+const checkUser = async () => {
+  const { data: { user: authUser } } = await supabase.auth.getUser()
+  if (!authUser) {
+    router.push('/login')
+    return
+  }
+
+  // Get user profile with company info
+  const { data: profile, error } = await supabase
+    .from('profiles')
+    .select(`
+      *,
+      companies (name, code)
+    `)
+    .eq('id', authUser.id)
+    .single()
+
+  if (error) {
+    console.error('Error fetching user profile:', error)
+    return
+  }
+
+  setUser({
+    ...authUser,
+    company: profile.companies,
+    role: profile.role
+  })
+}
 
 const downloadPDF = async (pdfUrl: string | undefined, fileName: string) => {
   if (!pdfUrl) {
@@ -90,6 +283,21 @@ const handleDeleteComplaint = async (complaintId: string, status: string) => {
 // Update the fetchComplaints function to include completion_id
 const fetchComplaints = async () => {
   try {
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return
+
+    // Get user's company_id
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('company_id')
+      .eq('id', user.id)
+      .single()
+
+          // SIMPLE NULL CHECK
+    if (!profile?.company_id) return
+      
+
+
     const { data, error } = await supabase
       .from('complaints')
       .select(`
@@ -99,6 +307,7 @@ const fetchComplaints = async () => {
           username
         )
       `)
+      .eq('company_id', profile.company_id) // ⬅️ ADD THIS FILTER
       .order('created_at', { ascending: false })
 
     if (error) throw error
@@ -158,34 +367,104 @@ const downloadCompletionPDF = async (completionId: string, fileName: string) => 
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
-      <header className="bg-white shadow">
-        <div className="max-w-7xl mx-auto px-4 py-4 sm:px-6 lg:px-8 flex justify-between items-center">
-          <h1 className="text-2xl font-bold text-gray-800">Maintenance Dashboard</h1>
-          <div className="flex items-center gap-4">
-            
-            <button
-              onClick={handleLogout}
-              className="bg-red-500 text-white px-4 py-2 rounded hover:bg-red-600"
-            >
-              Logout
-            </button>
-          </div>
-        </div>
-      </header>
+<header className="bg-white shadow">
+  <div className="max-w-7xl mx-auto px-4 py-4 sm:px-6 lg:px-8 flex justify-between items-center">
+    <div>
+      <h1 className="text-2xl font-bold text-gray-800">Maintenance Dashboard</h1>
+      <p className="text-sm text-gray-600 mt-1">
+        Company: <span className="font-semibold">{user?.company?.name || 'Loading...'}</span>
+      </p>
+    </div>
+    <div className="flex items-center gap-4">
+      <button
+        onClick={handleLogout}
+        className="bg-red-500 text-white px-4 py-2 rounded hover:bg-red-600"
+      >
+        Logout
+      </button>
+    </div>
+  </div>
+  {user?.role === 'super_admin' && (
+  <button
+    onClick={() => router.push('/admin')}
+    className="bg-purple-500 text-white px-4 py-2 rounded hover:bg-purple-600"
+  >
+    Admin Panel
+  </button>
+)}
+</header>
 
       {/* Main Content */}
-      <main className="max-w-7xl mx-auto px-4 py-8 sm:px-6 lg:px-8">
-        <div className="mb-6 flex justify-between items-center">
-          <h2 className="text-xl font-semibold text-gray-800">All Complaints</h2>
-          <button
-            onClick={() => router.push('/complaints')}
-            className="bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600"
-          >
-            + New Complaint
-          </button>
-        </div>
+<main className="max-w-7xl mx-auto px-4 py-8 sm:px-6 lg:px-8">
+  <div className="mb-6 flex justify-between items-center">
+    <div>
+      <h2 className="text-xl font-semibold text-gray-800">
+        {activeTab === 'complaints' ? 'All Complaints' : 'My Drafts'}
+      </h2>
+      <p className="text-sm text-gray-500 mt-1">
+        {activeTab === 'complaints' 
+          ? `Total: ${complaints.length} complaints` 
+          : `Total: ${drafts.length} drafts`
+        }
+      </p>
+    </div>
+    <button
+      onClick={() => router.push('/complaints')}
+      className="bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600"
+    >
+      + New Complaint
+    </button>
+  </div>
 
-        {/* Complaints Table */}
+  {/* Tab Navigation */}
+{/* Tab Navigation */}
+<div className="mb-6 border-b border-gray-200">
+  <nav className="-mb-px flex space-x-8">
+    <button
+      onClick={() => setActiveTab('complaints')}
+      className={`py-2 px-1 border-b-2 font-medium text-sm ${
+        activeTab === 'complaints'
+          ? 'border-blue-500 text-blue-600'
+          : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+      }`}
+    >
+      Complaints ({complaints.length})
+    </button>
+    <button
+      onClick={() => setActiveTab('drafts')}
+      className={`py-2 px-1 border-b-2 font-medium text-sm ${
+        activeTab === 'drafts'
+          ? 'border-yellow-500 text-yellow-600'
+          : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+      }`}
+    >
+      Complaint Drafts ({drafts.length})
+    </button>
+    <button
+      onClick={() => setActiveTab('completion-drafts')}
+      className={`py-2 px-1 border-b-2 font-medium text-sm ${
+        activeTab === 'completion-drafts'
+          ? 'border-purple-500 text-purple-600'
+          : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+      }`}
+    >
+      Completion Drafts ({completionDrafts.length})
+    </button>
+  </nav>
+</div>
+
+  {/* Complaints Table */}
+  {activeTab === 'complaints' && (
+    <div className="bg-white shadow rounded-lg overflow-hidden">
+      {complaints.length === 0 ? (
+        <div className="p-8 text-center text-gray-500">
+          No complaints submitted yet.
+        </div>
+      ) : (
+        // Your existing complaints table goes here
+        <div className="overflow-x-auto">
+          <table className="min-w-full divide-y divide-gray-200">
+                    {/* Complaints Table */}
         <div className="bg-white shadow rounded-lg overflow-hidden">
           {complaints.length === 0 ? (
             <div className="p-8 text-center text-gray-500">
@@ -306,7 +585,151 @@ const downloadCompletionPDF = async (completionId: string, fileName: string) => 
             </div>
           )}
         </div>
-      </main>
+          </table>
+        </div>
+      )}
+    </div>
+  )}
+
+  {/* Drafts Table */}
+  {activeTab === 'drafts' && (
+    <div className="bg-white shadow rounded-lg overflow-hidden">
+      {drafts.length === 0 ? (
+        <div className="p-8 text-center text-gray-500">
+          No drafts saved yet. Start a new complaint and click "Save Draft" to save your work.
+        </div>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="min-w-full divide-y divide-gray-200">
+            <thead className="bg-gray-50">
+              <tr>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Building
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Incident
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Last Updated
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Images
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Actions
+                </th>
+              </tr>
+            </thead>
+            <tbody className="bg-white divide-y divide-gray-200">
+              {drafts.map((draft) => (
+                <tr key={draft.id} className="hover:bg-gray-50">
+                  <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                    {draft.form_data?.building_name || 'No building name'}
+                  </td>
+                  <td className="px-6 py-4 text-sm text-gray-500 max-w-xs truncate">
+                    {draft.form_data?.incident_description || 'No description'}
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                    {new Date(draft.updated_at).toLocaleDateString()} at{' '}
+                    {new Date(draft.updated_at).toLocaleTimeString()}
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                    {draft.uploaded_images?.length || 0} images
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => loadDraftForEditing(draft.id)}
+                        className="bg-blue-500 text-white px-3 py-1 rounded hover:bg-blue-600 text-sm"
+                      >
+                        Edit
+                      </button>
+                      <button
+                        onClick={() => deleteDraft(draft.id)}
+                        className="bg-red-500 text-white px-3 py-1 rounded hover:bg-red-600 text-sm"
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  )}
+  {/* Completion Drafts Table */}
+{activeTab === 'completion-drafts' && (
+  <div className="bg-white shadow rounded-lg overflow-hidden">
+    {completionDrafts.length === 0 ? (
+      <div className="p-8 text-center text-gray-500">
+        No completion drafts saved yet. Click on a pending complaint to start a completion form and save as draft.
+      </div>
+    ) : (
+      <div className="overflow-x-auto">
+        <table className="min-w-full divide-y divide-gray-200">
+          <thead className="bg-gray-50">
+            <tr>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                Complaint
+              </th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                Work Title
+              </th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                Last Updated
+              </th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                Images
+              </th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                Actions
+              </th>
+            </tr>
+          </thead>
+          <tbody className="bg-white divide-y divide-gray-200">
+            {completionDrafts.map((draft) => (
+              <tr key={draft.id} className="hover:bg-gray-50">
+                <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                  {draft.complaints?.building_name || 'Unknown complaint'}
+                </td>
+                <td className="px-6 py-4 text-sm text-gray-500 max-w-xs truncate">
+                  {draft.form_data?.work_title || 'No work title'}
+                </td>
+                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                  {new Date(draft.updated_at).toLocaleDateString()} at{' '}
+                  {new Date(draft.updated_at).toLocaleTimeString()}
+                </td>
+                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                  {draft.uploaded_images?.length || 0} images
+                </td>
+                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => loadCompletionDraft(draft.id)}
+                      className="bg-blue-500 text-white px-3 py-1 rounded hover:bg-blue-600 text-sm"
+                    >
+                      Continue
+                    </button>
+                    <button
+                      onClick={() => deleteCompletionDraft(draft.id)}
+                      className="bg-red-500 text-white px-3 py-1 rounded hover:bg-red-600 text-sm"
+                    >
+                      Delete
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    )}
+  </div>
+)}
+</main>
     </div>
   )
 }

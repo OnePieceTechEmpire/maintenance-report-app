@@ -5,6 +5,7 @@ import Image from 'next/image'
 import { useState } from 'react'
 import { signIn, signUp } from '@/lib/auth'
 import { useRouter } from 'next/navigation'
+import { supabase } from '@/lib/supabase' // Add this import
 
 export default function Login() {
   const [email, setEmail] = useState('')
@@ -21,13 +22,31 @@ export default function Login() {
     setError(null)
 
     try {
-      if (isSignUp) {
-        await signUp(email, password, fullName)
-        alert('Registration successful! Please check your email for verification.')
+   if (isSignUp) {
+      await signUp(email, password, fullName)
+      alert('Registration successful! Please check your email for verification.')
+    } else {
+      const { user } = await signIn(email, password) // Get user from signIn
+      
+      if (!user) {
+        router.push('/dashboard')
+        return
+      }
+
+      // Get user profile to check role and company
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('role, company_id')
+        .eq('id', user.id)
+        .single()
+
+      // Redirect super admin with no company to admin panel
+      if (profile?.role === 'super_admin' && !profile?.company_id) {
+        router.push('/admin')
       } else {
-        await signIn(email, password)
         router.push('/dashboard')
       }
+    }
     } catch (error: any) {
       console.error('Auth error:', error)
       

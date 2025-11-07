@@ -53,7 +53,12 @@ export async function uploadComplaintImages(complaintId: string, images: File[],
 }
 
 // Add a new function for completion images
-export async function uploadCompletionImages(completionId: string, images: File[], captions: string[] = []): Promise<ImageWithCaption[]> {
+export async function uploadCompletionImages(
+  completionId: string, 
+  images: File[], 
+  captions: string[] = [],
+  folder: 'completion' | 'receipt' = 'completion' // Add this parameter
+): Promise<ImageWithCaption[]> {
   const imageData: ImageWithCaption[] = []
   
   for (let i = 0; i < images.length; i++) {
@@ -69,7 +74,7 @@ export async function uploadCompletionImages(completionId: string, images: File[
       }
 
       const fileExt = 'jpg'
-      const fileName = `completions/${completionId}/${Date.now()}-${Math.random().toString(36).substring(2)}.${fileExt}`
+            const fileName = `completions/${completionId}/${folder}/${Date.now()}-${Math.random().toString(36).substring(2)}.${fileExt}`
       
       const { data, error } = await supabase.storage
         .from('complaint-images') // Using same bucket, but different folder
@@ -83,7 +88,9 @@ export async function uploadCompletionImages(completionId: string, images: File[
       
       imageData.push({
         url: publicUrl,
-        caption: caption
+        caption: caption,
+        storage_path: fileName, // Add this for draft cleanup
+        type: folder // Add type to distinguish
       })
       
     } catch (error) {
