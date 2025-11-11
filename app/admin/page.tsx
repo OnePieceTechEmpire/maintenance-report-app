@@ -65,10 +65,38 @@ const sendInvitation = async () => {
     if (error) throw error
 
     const invitationLink = `${window.location.origin}/invite/${token}`
-    await navigator.clipboard.writeText(invitationLink)
     
-    alert(`✅ Invitation created for ${inviteEmail}!\n\nLink copied to clipboard.`)
-
+    // ✅ FIXED: Better clipboard handling for mobile
+    try {
+      await navigator.clipboard.writeText(invitationLink)
+      
+      // Show success message with copy option
+      alert(`✅ Invitation created for ${inviteEmail}!\n\nLink copied to clipboard.`)
+      
+    } catch (clipboardError) {
+      console.warn('Clipboard failed, showing link for manual copy:', clipboardError)
+      
+      // Mobile fallback - show the link and instructions
+      const shouldCopy = confirm(
+        `✅ Invitation created for ${inviteEmail}!\n\n` +
+        `Invitation Link:\n${invitationLink}\n\n` +
+        `Please copy this link manually and send it to the user.`
+      )
+      
+      // Optional: Try to select the text for easier copying on mobile
+      if (shouldCopy) {
+        // Create a temporary input to help with copying on mobile
+        const tempInput = document.createElement('input')
+        tempInput.value = invitationLink
+        document.body.appendChild(tempInput)
+        tempInput.select()
+        tempInput.setSelectionRange(0, 99999) // For mobile devices
+        document.execCommand('copy')
+        document.body.removeChild(tempInput)
+        
+        alert('Link selected! Please paste it to share with the user.')
+      }
+    }
         // ⬇️⬇️ ADD THIS - Refresh the pending invites list ⬇️⬇️
     fetchPendingInvites()
     
@@ -158,37 +186,42 @@ const resendInvitation = async (invite: any) => {
     setCompanies(data || [])
   }
 
-  const updateUserRole = async (userId: string, newRole: string) => {
-    const { error } = await supabase
-      .from('profiles')
-      .update({ role: newRole })
-      .eq('id', userId)
+const updateUserRole = async (userId: string, newRole: string) => {
+  const { data, error } = await supabase
+    .from('profiles')
+    .update({ role: newRole })
+    .eq('id', userId)
+    .select() // Add this to see the actual response
 
-    if (error) {
-      alert('Error updating user role')
-      console.error(error)
-      return
-    }
-    
-    alert('User role updated successfully')
-    fetchUsers() // Refresh the list
+  if (error) {
+    alert('Error updating user role: ' + error.message)
+    console.error(error)
+    return
   }
+  
+  console.log('Update response:', data) // Check what comes back
+  alert('User role updated successfully')
+  fetchUsers()
+}
 
-  const updateUserCompany = async (userId: string, companyId: string) => {
-    const { error } = await supabase
-      .from('profiles')
-      .update({ company_id: companyId })
-      .eq('id', userId)
 
-    if (error) {
-      alert('Error updating user company')
-      console.error(error)
-      return
-    }
-    
-    alert('User company updated successfully')
-    fetchUsers()
+const updateUserCompany = async (userId: string, companyId: string) => {
+  const { data, error } = await supabase
+    .from('profiles')
+    .update({ company_id: companyId })
+    .eq('id', userId)
+    .select() // Add this to see the actual response
+
+  if (error) {
+    alert('Error updating user company: ' + error.message)
+    console.error(error)
+    return
   }
+  
+  console.log('Update response:', data) // Check what comes back
+  alert('User company updated successfully')
+  fetchUsers()
+}
 
   if (loading) {
     return (
@@ -273,7 +306,7 @@ const resendInvitation = async (invite: any) => {
             <select
               value={selectedCompanyFilter}
               onChange={(e) => setSelectedCompanyFilter(e.target.value)}
-              className="border rounded px-3 py-1 text-sm"
+              className="border rounded px-1 py-1 text-sm"
             >
               <option value="all">All Companies</option>
               {companies.map(company => (
@@ -305,9 +338,7 @@ const resendInvitation = async (invite: any) => {
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                 Status
               </th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Actions
-              </th>
+
             </tr>
           </thead>
           <tbody className="bg-white divide-y divide-gray-200">
@@ -355,14 +386,7 @@ const resendInvitation = async (invite: any) => {
                     {user.status || 'active'}
                   </span>
                 </td>
-                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                  <button
-                    onClick={() => {/* Add suspend/activate functionality */}}
-                    className="bg-red-500 text-white px-3 py-1 rounded hover:bg-red-600 text-sm"
-                  >
-                    {user.status === 'active' ? 'Suspend' : 'Activate'}
-                  </button>
-                </td>
+
               </tr>
             ))}
           </tbody>

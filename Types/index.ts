@@ -26,7 +26,8 @@ export interface Complaint {
   profiles?: {
     full_name: string;
     username: string;
-  };
+  }
+    hasCompletionDraft?: boolean // Add this
 }
 
 export interface ComplaintFormData {

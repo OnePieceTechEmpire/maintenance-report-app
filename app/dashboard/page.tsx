@@ -286,19 +286,16 @@ const fetchComplaints = async () => {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return
 
-    // Get user's company_id
     const { data: profile } = await supabase
       .from('profiles')
       .select('company_id')
       .eq('id', user.id)
       .single()
 
-          // SIMPLE NULL CHECK
     if (!profile?.company_id) return
-      
 
-
-    const { data, error } = await supabase
+    // Fetch complaints
+    const { data: complaintsData, error } = await supabase
       .from('complaints')
       .select(`
         *,
@@ -307,11 +304,27 @@ const fetchComplaints = async () => {
           username
         )
       `)
-      .eq('company_id', profile.company_id) // ⬅️ ADD THIS FILTER
+      .eq('company_id', profile.company_id)
       .order('created_at', { ascending: false })
 
     if (error) throw error
-    setComplaints(data || [])
+
+    // Fetch completion drafts for the current user
+    const { data: draftData } = await supabase
+      .from('completion_drafts')
+      .select('complaint_id')
+      .eq('user_id', user.id)
+
+    // Create a Set of complaint IDs that have drafts
+    const complaintIdsWithDrafts = new Set(draftData?.map(draft => draft.complaint_id) || [])
+
+    // Add hasDraft property to each complaint
+    const complaintsWithDraftInfo = complaintsData?.map(complaint => ({
+      ...complaint,
+      hasCompletionDraft: complaintIdsWithDrafts.has(complaint.id)
+    })) || []
+
+    setComplaints(complaintsWithDraftInfo)
   } catch (error) {
     console.error('Error fetching complaints:', error)
   } finally {
@@ -319,8 +332,17 @@ const fetchComplaints = async () => {
   }
 }
 
-  const handleMarkComplete = (complaintId: string) => {
-  router.push(`/completions/new?complaintId=${complaintId}`)
+const handleMarkComplete = (complaintId: string) => {
+  // Check if there's already a draft for this complaint
+  const existingDraft = completionDrafts.find(draft => draft.complaint_id === complaintId)
+  
+  if (existingDraft) {
+    // If draft exists, go to edit the draft
+    router.push(`/completions/new?complaintId=${complaintId}&draftId=${existingDraft.id}`)
+  } else {
+    // If no draft, create new completion
+    router.push(`/completions/new?complaintId=${complaintId}`)
+  }
 }
 
 // Add this function to download completion PDF
@@ -440,7 +462,7 @@ const downloadCompletionPDF = async (completionId: string, fileName: string) => 
     >
       Complaint Drafts ({drafts.length})
     </button>
-    <button
+   {/* <button
       onClick={() => setActiveTab('completion-drafts')}
       className={`py-2 px-1 border-b-2 font-medium text-sm ${
         activeTab === 'completion-drafts'
@@ -449,7 +471,7 @@ const downloadCompletionPDF = async (completionId: string, fileName: string) => 
       }`}
     >
       Completion Drafts ({completionDrafts.length})
-    </button>
+    </button>*/}
   </nav>
 </div>
 
@@ -509,13 +531,25 @@ const downloadCompletionPDF = async (completionId: string, fileName: string) => 
       </td>
       <td className="px-6 py-4 whitespace-nowrap">
         {complaint.status === 'pending' ? (
-          <button
-            onClick={() => handleMarkComplete(complaint.id)}
-            className="bg-yellow-100 text-yellow-800 px-3 py-1 rounded-full text-xs font-semibold hover:bg-yellow-200 cursor-pointer"
-          >
-            Pending
-          </button>
+          complaint.hasCompletionDraft ? (
+            // Draft exists - show "Draft in Progress"
+            <button
+              onClick={() => handleMarkComplete(complaint.id)}
+              className="bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-xs font-semibold hover:bg-blue-200 cursor-pointer"
+            >
+              Draft in Progress
+            </button>
+          ) : (
+            // No draft - show "Pending"
+            <button
+              onClick={() => handleMarkComplete(complaint.id)}
+              className="bg-yellow-100 text-yellow-800 px-3 py-1 rounded-full text-xs font-semibold hover:bg-yellow-200 cursor-pointer"
+            >
+              Pending
+            </button>
+          )
         ) : (
+          // Completed
           <span className="bg-green-100 text-green-800 px-3 py-1 rounded-full text-xs font-semibold">
             Completed
           </span>
@@ -660,7 +694,7 @@ const downloadCompletionPDF = async (completionId: string, fileName: string) => 
       )}
     </div>
   )}
-  {/* Completion Drafts Table */}
+  {/* Completion Drafts Table 
 {activeTab === 'completion-drafts' && (
   <div className="bg-white shadow rounded-lg overflow-hidden">
     {completionDrafts.length === 0 ? (
@@ -728,7 +762,7 @@ const downloadCompletionPDF = async (completionId: string, fileName: string) => 
       </div>
     )}
   </div>
-)}
+)}*/}
 </main>
     </div>
   )

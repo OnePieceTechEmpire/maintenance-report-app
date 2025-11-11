@@ -41,6 +41,7 @@ const [currentDraftId, setCurrentDraftId] = useState<string | null>(null)
   const searchParams = useSearchParams()
   const complaintId = searchParams.get('complaintId')
   const draftId = searchParams.get('draftId') // Add this line
+    const [uploadProgress, setUploadProgress] = useState(0)
   const [receiptImages, setReceiptImages] = useState<File[]>([])
 const [receiptImagePreviews, setReceiptImagePreviews] = useState<string[]>([])
 
@@ -154,12 +155,21 @@ const removeReceipt = (index: number) => {
       console.error('Completion PDF generation error:', error)
     }
   }
+  
 const handleCompletionImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
   const files = Array.from(e.target.files || [])
   
-  const validationError = validateImages([...completionImages, ...files])
+  // ✅ FIX: Only validate the NEW files, not existing ones
+  const validationError = validateImages(files)
   if (validationError) {
     alert(validationError)
+    return
+  }
+
+  // ✅ FIX: Check total count separately
+  const totalImages = completionImages.length + files.length
+  if (totalImages > 5) {
+    alert('Maksimum 5 gambar untuk penyelesaian')
     return
   }
 
@@ -651,6 +661,7 @@ if (isEditingDraft && currentDraftId) {
       alert('Failed to submit completion form')
     } finally {
       setLoading(false)
+          setUploadProgress(0)
     }
   }
 
@@ -678,6 +689,22 @@ if (isEditingDraft && currentDraftId) {
     untuk aduan: <strong>{complaint.building_name}</strong> - {complaint.incident_description}
   </p>
 )}
+
+        {/* Upload Progress */}
+        {uploadProgress > 0 && (
+          <div className="mb-6">
+            <div className="flex justify-between text-sm text-gray-600 mb-1">
+              <span>Uploading...</span>
+              <span>{uploadProgress}%</span>
+            </div>
+            <div className="w-full bg-gray-200 rounded-full h-2">
+              <div 
+                className="bg-blue-500 h-2 rounded-full transition-all duration-300"
+                style={{ width: `${uploadProgress}%` }}
+              ></div>
+            </div>
+          </div>
+        )}
 
         
         <form onSubmit={handleSubmit} className="space-y-6">
