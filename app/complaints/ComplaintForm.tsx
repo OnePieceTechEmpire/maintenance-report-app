@@ -35,6 +35,7 @@ const [currentDraftId, setCurrentDraftId] = useState<string | null>(null)
 const [imageCaptions, setImageCaptions] = useState<string[]>([])
 // Inside your ComplaintForm component, add:
 const searchParams = useSearchParams()
+const debugMode = searchParams.get('debug') === 'true'
 const draftId = searchParams.get('draftId')
 const draftLoadedRef = useRef(false)
 
@@ -52,6 +53,8 @@ useEffect(() => {
 const handleSaveDraft = async () => {
   setSavingDraft(true)
   
+  if (debugMode) alert('🚀 START: Saving draft...')
+
   try {
     const { data: { user } } = await supabase.auth.getUser()
     
@@ -60,11 +63,15 @@ const handleSaveDraft = async () => {
       return
     }
 
+        if (debugMode) alert(`📸 STEP 1: Uploading ${images.length} images...`)
+
     // Upload images to storage if we have any
     let uploadedImagesData: any[] = []
     if (images.length > 0) {
       const { uploadDraftImages } = await import('@/lib/draft-image-utils')
       uploadedImagesData = await uploadDraftImages(user.id, images)
+
+            if (debugMode) alert('✅ STEP 1 DONE: Images uploaded')
       
       // Add captions to uploaded images
       uploadedImagesData = uploadedImagesData.map((img, index) => ({
@@ -73,12 +80,18 @@ const handleSaveDraft = async () => {
       }))
     }
 
+
+        if (debugMode) alert('💾 STEP 2: Saving draft data...')
+
     const draftData = {
       form_data: formData,
       uploaded_images: uploadedImagesData
     }
 
 if (isEditingDraft && currentDraftId) {
+
+        if (debugMode) alert('🔄 STEP 3: Updating existing draft...')
+      
   // Delete old images if they exist
   const { data: oldDraft, error: fetchError } = await supabase
     .from('complaint_drafts')
@@ -123,7 +136,10 @@ if (isEditingDraft && currentDraftId) {
 
       if (error) throw error
       alert('Draf berjaya dikemas kini!')
+            if (debugMode) alert('✅ STEP 3 DONE: Draft updated!')
     } else {
+
+            if (debugMode) alert('🆕 STEP 3: Creating new draft...')
       // Create new draft
       const { data, error } = await supabase
         .from('complaint_drafts')
@@ -140,6 +156,7 @@ if (isEditingDraft && currentDraftId) {
       setCurrentDraftId(data[0].id)
       setIsEditingDraft(true)
       alert('Draf berjaya disimpan!')
+            if (debugMode) alert('✅ STEP 3 DONE: Draft created!')
     }
     
   } catch (error) {
