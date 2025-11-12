@@ -156,7 +156,8 @@ export async function generateCompletionPDF(completion: any): Promise<Uint8Array
   const font = await pdfDoc.embedFont(StandardFonts.Helvetica)
   const fontBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold)
   
-  const page = pdfDoc.addPage([600, 800])
+  let page = pdfDoc.addPage([600, 800])
+
   const { width, height } = page.getSize()
   
   let y = height - 50
@@ -263,28 +264,28 @@ y -= 20
     }
   }
 
-  // Signature Section
-  if (y < 200) {
-    y = height - 50
-  } else {
-    y -= 30
-  }
+ // Signature Section
+if (y < 200) {
+  // Add new page instead of resetting y
+  page = pdfDoc.addPage([600, 800])
+  y = height - 50
+}
 
-  page.drawText('PENGESAHAN', {
-    x: 50, y, size: 14, font: fontBold, color: rgb(0.1, 0.1, 0.1),
-  })
-  y -= 40
+page.drawText('PENGESAHAN', {
+  x: 50, y, size: 14, font: fontBold, color: rgb(0.1, 0.1, 0.1),
+})
+y -= 40
 
-  // Signature line
-  page.drawLine({
-    start: { x: 50, y }, end: { x: 300, y }, thickness: 1, color: rgb(0, 0, 0),
-  })
-  
-// Draw the signature (a bit above the line)
+// Signature line
+page.drawLine({
+  start: { x: 50, y }, end: { x: 300, y }, thickness: 1, color: rgb(0, 0, 0),
+})
+
+// Draw the signature text (above the line)
 if (completion.pic_signature_url) {
   page.drawText(completion.pic_signature_url, {
     x: 50,
-    y: y + 5, // move it *up* a bit instead of down
+    y: y + 5,
     size: 12,
     font: fontBold,
     color: rgb(0.1, 0.1, 0.1),
@@ -299,6 +300,7 @@ page.drawText('Tandatangan PIC', {
   font,
   color: rgb(0.4, 0.4, 0.4),
 })
+
 
   // ✅ ADD THIS LINE - Call the image function after signature
   await addCompletionImages(pdfDoc, page, completion, font, fontBold)
