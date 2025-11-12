@@ -401,25 +401,48 @@ const loadCompletionDraft = async (draftId: string) => {
     setFormData(draft.form_data)
     setSignature(draft.form_data.signature || '')
     
-    // Load images from storage
+     // Load images from storage
     if (draft.uploaded_images && draft.uploaded_images.length > 0) {
       const { downloadDraftImages } = await import('@/lib/draft-image-utils')
       
       try {
         const downloadedFiles = await downloadDraftImages(draft.uploaded_images)
         
-        // Set the actual File objects
-        setCompletionImages(downloadedFiles)
+// ✅ FIX: SEPARATE COMPLETION IMAGES FROM RECEIPT IMAGES
+const completionImageData: any[] = []
+const receiptImageData: any[] = []
         
-        // Set previews and captions
-        setCompletionImagePreviews(draft.uploaded_images.map((img: any) => img.preview))
-        setCompletionImageCaptions(draft.uploaded_images.map((img: any) => img.caption || ''))
+        draft.uploaded_images.forEach((img: any, index: number) => {
+          if (img.type === 'completion') {
+            completionImageData.push({
+              file: downloadedFiles[index],
+              preview: img.preview,
+              caption: img.caption || ''
+            })
+          } else if (img.type === 'receipt') {
+            receiptImageData.push({
+              file: downloadedFiles[index],
+              preview: img.preview,
+              caption: img.caption || ''
+            })
+          }
+        })
+
+        // ✅ Set completion images only
+        setCompletionImages(completionImageData.map(item => item.file))
+        setCompletionImagePreviews(completionImageData.map(item => item.preview))
+        setCompletionImageCaptions(completionImageData.map(item => item.caption))
+
+        // ✅ Set receipt images only  
+        setReceiptImages(receiptImageData.map(item => item.file))
+        setReceiptImagePreviews(receiptImageData.map(item => item.preview))
         
       } catch (error) {
         console.error('Error loading completion draft images:', error)
         alert('Some images could not be loaded from draft')
       }
     }
+
 
     setCurrentDraftId(draft.id)
     setIsEditingDraft(true)

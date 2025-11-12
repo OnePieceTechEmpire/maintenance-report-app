@@ -64,6 +64,8 @@ export interface Completion {
     full_name: string;
     completion_images?: ImageWithCaption[]; // Add this
   };
+  completion_images: ImageWithCaption[]
+  receipt_images: ImageWithCaption[]
 }
 
 export interface CompletionFormData {

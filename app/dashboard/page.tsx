@@ -192,7 +192,42 @@ const deleteDraft = async (draftId: string) => {
   }
 }
 
+const viewReceipts = async (completionId: string) => {
+  try {
+    const { data: completion, error } = await supabase
+      .from('completions')
+      .select('completion_images, receipt_images') // Get both
+      .eq('id', completionId)
+      .single()
 
+    if (error) throw error
+
+    console.log('📋 All completion images:', completion.completion_images)
+    
+    // ✅ Check BOTH completion_images AND receipt_images for receipts
+    const receiptImages = 
+      completion.receipt_images || // Check receipt_images first
+      completion.completion_images?.filter((img: any) => img.type === 'receipt') || // Then check completion_images
+      []
+
+    console.log('🧾 Found receipt images:', receiptImages)
+
+    if (receiptImages.length === 0) {
+      alert('Tiada resit untuk aduan ini')
+      return
+    }
+
+    const receiptUrls = receiptImages.map((img: any) => img.url)
+    console.log('🔗 Receipt URLs:', receiptUrls)
+    
+    // Open first receipt
+    window.open(receiptUrls[0], '_blank')
+    
+  } catch (error) {
+    console.error('Error viewing receipts:', error)
+    alert('Gagal memuat resit')
+  }
+}
 
 const checkUser = async () => {
   const { data: { user: authUser } } = await supabase.auth.getUser()
@@ -597,6 +632,19 @@ const downloadCompletionPDF = async (completionId: string, fileName: string) => 
               className="block w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 text-left"
             >
               PDF Penyelesaian
+            </button>
+          )}
+
+                    {/* ✅ VIEW RECEIPT - Only for Completed with receipts */}
+          {complaint.status === 'completed' && (
+            <button
+              onClick={() => {
+                viewReceipts(complaint.completion_id!)
+                setOpenDropdown(null)
+              }}
+              className="block w-full px-4 py-2 text-sm text-green-600 hover:bg-green-50 text-left"
+            >
+              Lihat Resit
             </button>
           )}
           
