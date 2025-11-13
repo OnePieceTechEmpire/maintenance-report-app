@@ -144,7 +144,6 @@ const acceptInvitation = async (e: React.FormEvent) => {
     <div className="min-h-screen bg-gray-50 flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8">
       <div className="max-w-md w-full bg-white p-8 rounded-lg shadow-md">
         <div className="text-center mb-6">
-          <div className="text-green-500 text-lg mb-2">🎉</div>
           <h1 className="text-2xl font-bold text-gray-800">You're Invited!</h1>
           <p className="text-gray-600 mt-2">
             Join {invite.companies.name} as {invite.role}

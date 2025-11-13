@@ -108,7 +108,12 @@ const removeReceipt = (index: number) => {
   const fetchComplaint = async () => {
     const { data, error } = await supabase
       .from('complaints')
-      .select('*')
+        .select(`
+    *,
+    profiles:submitted_by (
+      full_name
+    )
+  `)
       .eq('id', complaintId)
       .single()
     
@@ -119,6 +124,7 @@ const removeReceipt = (index: number) => {
         ...prev,
         work_location: data.incident_location,
         work_title: `Penyelenggaraan - ${data.building_name}`,
+          supervisor_name: data.profiles?.full_name || "",
         completion_date: new Date().toISOString().split('T')[0]
       }))
     }
@@ -158,97 +164,34 @@ const removeReceipt = (index: number) => {
   
 const handleCompletionImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
   const files = Array.from(e.target.files || [])
-  
-  // ✅ FIX: Only validate the NEW files, not existing ones
-  const validationError = validateImages(files)
-  if (validationError) {
-    alert(validationError)
-    return
-  }
 
-  // ✅ FIX: Check total count separately
-  const totalImages = completionImages.length + files.length
-  if (totalImages > 5) {
-    alert('Maksimum 5 gambar untuk penyelesaian')
-    return
-  }
-
-  // Debug: Check what location data we have
-  console.log('📍 Current formData:', {
-    work_location: formData.work_location,    work_title: formData.work_title
-  })
-
-  // Get current location with better error handling
-  let currentLocation = { location: '' }
-  try {
-    console.log('🔄 Getting current location...')
-    currentLocation = await getCurrentLocation()
-    console.log('📍 Current location result:', currentLocation.location)
-  } catch (error) {
-    console.error('❌ Failed to get current location:', error)
-  }
-
-  const now = new Date()
-  const dayNames = ['Ahad', 'Isnin', 'Selasa', 'Rabu', 'Khamis', 'Jumaat', 'Sabtu']
-  const dayName = dayNames[now.getDay()]
-
-  // IMPROVED LOCATION FALLBACK LOGIC
-  const locationToUse = 
-    currentLocation.location || // First priority: GPS location
-    formData.work_location ||   // Second: work_location from form
-
-    'Lokasi tidak dapat dikesan' // Final fallback
-
-  console.log('📝 Final location being used:', locationToUse)
-
-  const metadata = {
-    timestamp: now.toLocaleTimeString('ms-MY'),
-    date: `${dayName}, ${now.toLocaleDateString('ms-MY')}`,
-    location: locationToUse,
-    additionalInfo: `Penyelesaian: ${formData.work_title || 'N/A'}`
-  }
-
-  // Process each image with metadata overlay
+  // No metadata, no GPS, no limit
   for (const file of files) {
     try {
-      console.log('🖼️ Adding metadata overlay to completion image...')
-      
-      const imageWithMetadata = await addMetadataOverlay(file, metadata)
-      
-      setCompletionImages(prev => [...prev, imageWithMetadata])
-      
-      // Create preview with caption
-      const reader = new FileReader()
-      reader.onload = () => {
-        if (reader.result) {
-          setCompletionImagePreviews(prev => [...prev, reader.result as string])
-          setCompletionImageCaptions(prev => [...prev, ''])
-        }
-      }
-      reader.onerror = () => {
-        console.error('Failed to read file:', file.name)
-        setCompletionImages(prev => prev.filter(f => f !== imageWithMetadata))
-      }
-      reader.readAsDataURL(imageWithMetadata)
-      
-    } catch (error) {
-      console.error('❌ Failed to add metadata overlay:', error)
-      // Fallback: use original image without metadata
+      // Add file directly
       setCompletionImages(prev => [...prev, file])
-      
+
+      // Create preview
       const reader = new FileReader()
       reader.onload = () => {
         if (reader.result) {
           setCompletionImagePreviews(prev => [...prev, reader.result as string])
-          setCompletionImageCaptions(prev => [...prev, ''])
+          setCompletionImageCaptions(prev => [...prev, ""]) // default empty caption
         }
       }
       reader.readAsDataURL(file)
+
+    } catch (error) {
+      console.error("❌ Failed to process completion image:", error)
     }
   }
 
-  e.target.value = ''
+  // Reset input so user can re-upload same file
+  if (e.target) {
+    e.target.value = ""
+  }
 }
+
 
   const removeCompletionImage = (index: number) => {
     setCompletionImages(prev => prev.filter((_, i) => i !== index))
@@ -776,25 +719,9 @@ if (isEditingDraft && currentDraftId) {
               />
             </div>
 
-            <div>
+                        <div>
               <label className="block text-gray-700 text-sm font-bold mb-2">
-                4. Nama syarikat *
-              </label>
-              <input
-                type="text"
-                name="company_name"
-                value={formData.company_name}
-                onChange={handleChange}
-                className="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
-                required
-              />
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div>
-              <label className="block text-gray-700 text-sm font-bold mb-2">
-                5. No Arahan Kerja
+                4. No Arahan Kerja
               </label>
               <input
                 type="text"
@@ -805,25 +732,19 @@ if (isEditingDraft && currentDraftId) {
               />
             </div>
 
-            <div>
-              <label className="block text-gray-700 text-sm font-bold mb-2">
-                6. Nama pegawai *
-              </label>
-              <input
-                type="text"
-                name="officer_name"
-                value={formData.officer_name}
-                onChange={handleChange}
-                className="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
-                required
-              />
-            </div>
+
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+
+
+
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div>
               <label className="block text-gray-700 text-sm font-bold mb-2">
-                7. Nama Penyelia *
+                6. Nama Staff *
               </label>
               <input
                 type="text"
@@ -837,7 +758,7 @@ if (isEditingDraft && currentDraftId) {
 
             <div>
               <label className="block text-gray-700 text-sm font-bold mb-2">
-                11. Bil Pekerja
+                7. Bil Pekerja
               </label>
               <input
                 type="number"
@@ -868,7 +789,7 @@ if (isEditingDraft && currentDraftId) {
                   {/* NEW: Completion Images Section */}
           <div>
             <label className="block text-gray-700 text-sm font-bold mb-2">
-              Gambar Selepas Pembaikan (Maksimum 5)
+              Gambar Selepas Pembaikan 
             </label>
             <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center">
               <input
@@ -886,7 +807,7 @@ if (isEditingDraft && currentDraftId) {
                 Pilih Gambar
               </label>
               <p className="text-xs text-gray-400 mt-1">
-                PNG, JPG, GIF sehingga 5MB. Maksimum 5 gambar.
+                PNG, JPG, GIF sehingga 5MB.
               </p>
             </div>
 
@@ -897,7 +818,7 @@ if (isEditingDraft && currentDraftId) {
 {completionImagePreviews.length > 0 && (
   <div className="mt-4">
     <h3 className="text-sm font-medium text-gray-700 mb-2">
-      Gambar Pembaikan ({completionImagePreviews.length}/5)
+      Gambar Pembaikan ({completionImagePreviews.length})
     </h3>
     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
       {completionImagePreviews.map((preview, index) => (
@@ -1018,7 +939,7 @@ if (isEditingDraft && currentDraftId) {
 </div>
           </div>
 
-          <div>
+   {/*          <div>
             <label className="block text-gray-700 text-sm font-bold mb-2">
               12. Tandatangan PIC
             </label>
@@ -1032,7 +953,7 @@ if (isEditingDraft && currentDraftId) {
             <p className="text-xs text-gray-500 mt-1">
               * Masukkan nama penuh sebagai tandatangan digital
             </p>
-          </div>
+          </div>*/}
 
 <div className="flex gap-4 pt-4 flex-wrap">
   <button

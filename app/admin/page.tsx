@@ -7,7 +7,7 @@ import { supabase } from '@/lib/supabase'
 export default function AdminPanel() {
   const [users, setUsers] = useState<any[]>([])
   const [companies, setCompanies] = useState<any[]>([])
-  const [activeTab, setActiveTab] = useState<'users' | 'companies' | 'invite'>('users')
+  const [activeTab, setActiveTab] = useState<'users' | 'companies' | 'invite'  | 'overview'>('users')
   const [loading, setLoading] = useState(true)
   const [user, setUser] = useState<any>(null)
   const router = useRouter()
@@ -17,12 +17,14 @@ const [inviteRole, setInviteRole] = useState('staff')
 const [inviting, setInviting] = useState(false)
 const [pendingInvites, setPendingInvites] = useState<any[]>([])
 const [selectedCompanyFilter, setSelectedCompanyFilter] = useState('all')
+const [companyStats, setCompanyStats] = useState<any[]>([]);
 
   useEffect(() => {
     checkAdminAccess()
     fetchUsers()
     fetchCompanies()
     fetchPendingInvites()
+    fetchCompanyStats();
   }, [])
 
 const fetchPendingInvites = async () => {
@@ -223,6 +225,44 @@ const updateUserCompany = async (userId: string, companyId: string) => {
   fetchUsers()
 }
 
+
+
+
+const fetchCompanyStats = async () => {
+  const { data, error } = await supabase
+    .from('companies')
+    .select(`
+      id,
+      name,
+      complaints:complaints (
+        id,
+        status
+      )
+    `);
+
+  if (error) {
+    console.error("Error fetching company stats:", error);
+    return;
+  }
+
+  const mapped = data.map(company => {
+    const complaints = company.complaints || [];
+
+    return {
+      id: company.id,
+      name: company.name,
+      total: complaints.length,
+      pending: complaints.filter(c => c.status === 'pending').length,
+      in_progress: complaints.filter(c => c.status === 'in_progress').length,
+      draft: complaints.filter(c => c.status === 'draft' || c.status === 'draft_in_progress').length,
+      completed: complaints.filter(c => c.status === 'completed').length,
+    };
+  });
+
+  setCompanyStats(mapped);
+};
+
+
   if (loading) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
@@ -274,6 +314,13 @@ const updateUserCompany = async (userId: string, companyId: string) => {
             >
               Companies ({companies.length})
             </button>
+            <button
+  onClick={() => setActiveTab('overview')}
+  className={`px-4 py-2 border-b-2 ${activeTab === 'overview' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-600'}`}
+>
+  Overview
+</button>
+
               <button
     onClick={() => setActiveTab('invite')}
     className={`py-2 px-1 border-b-2 font-medium text-sm ${
@@ -286,6 +333,42 @@ const updateUserCompany = async (userId: string, companyId: string) => {
   </button>
           </nav>
         </div>
+
+        {activeTab === 'overview' && (
+  <div className="bg-white shadow rounded-lg p-6">
+    <h2 className="text-lg font-semibold mb-4">Company Work Progress</h2>
+
+    {companyStats.length === 0 && (
+      <p className="text-gray-500">No data available.</p>
+    )}
+
+    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+      {companyStats.map(stat => (
+        <div key={stat.id} className="border rounded-lg p-5 shadow-sm bg-white">
+          <h3 className="text-base font-bold text-gray-800">
+            {stat.name}
+          </h3>
+
+          <div className="mt-3 space-y-1 text-sm">
+            <p>Total Aduan: <b>{stat.total}</b></p>
+            <p className="text-yellow-600">Pending: {stat.pending}</p>
+            <p className="text-blue-600">In Progress: {stat.in_progress}</p>
+            <p className="text-gray-600">Draft: {stat.draft}</p>
+            <p className="text-green-600 font-medium">Completed: {stat.completed}</p>
+          </div>
+
+          <button
+            onClick={() => router.push(`/admin/company/${stat.id}`)}
+            className="mt-4 w-full bg-blue-400 text-white py-2 rounded hover:bg-blue-700"
+          >
+            View Complaints
+          </button>
+        </div>
+      ))}
+    </div>
+  </div>
+)}
+
 
  {/* Users Tab */}
 {activeTab === 'users' && (() => {
@@ -422,7 +505,7 @@ const updateUserCompany = async (userId: string, companyId: string) => {
           value={inviteEmail}
           onChange={(e) => setInviteEmail(e.target.value)}
           className="w-full border rounded px-3 py-2 text-sm"
-          placeholder="user@company.com"
+          placeholder="user@gmail.com"
         />
       </div>
       <div>
@@ -451,9 +534,7 @@ const updateUserCompany = async (userId: string, companyId: string) => {
           onChange={(e) => setInviteRole(e.target.value)}
           className="w-full border rounded px-3 py-2 text-sm"
         >
-          <option value="staff">Staff</option>
-          <option value="company_admin">Company Admin</option>
-        </select>
+          <option value="staff">Staff</option>        </select>
       </div>
       <div className="flex items-end">
         <button

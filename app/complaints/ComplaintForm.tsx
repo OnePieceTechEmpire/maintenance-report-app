@@ -317,101 +317,34 @@ const deleteDraft = async () => {
 
 const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
   const files = Array.from(e.target.files || [])
-  
-  const validationError = validateImages([...images, ...files])
-  if (validationError) {
-    alert(validationError)
-    return
-  }
 
-  // Get current form data for metadata
-  const latestFormData = {
-    building_name: formData.building_name,
-    incident_location: formData.incident_location
-  }
-
-  // Try to get current location - with timeout and better error handling
-  let currentLocationText = latestFormData.incident_location || '' // Fallback to form data
-  
-  try {
-    console.log('📍 Attempting to get current location...')
-    const currentLocation = await Promise.race([
-      getCurrentLocation(),
-      new Promise((_, reject) => setTimeout(() => reject(new Error('Location timeout')), 10000)) // 10 second timeout
-    ]) as any
-    
-    if (currentLocation?.location) {
-      currentLocationText = currentLocation.location
-      console.log('📍 Location obtained:', currentLocationText)
-    }
-  } catch (err) {
-    console.warn('⚠️ Location access failed:', err)
-    // Don't show alert here - just use fallback
-    currentLocationText = latestFormData.incident_location || 'Location not available'
-    console.log('📍 Using fallback location:', currentLocationText)
-  }
-
-  const now = new Date()
-  const dayNames = ['Ahad', 'Isnin', 'Selasa', 'Rabu', 'Khamis', 'Jumaat', 'Sabtu']
-  const dayName = dayNames[now.getDay()]
-
-  const metadata = {
-    timestamp: now.toLocaleTimeString('ms-MY'),
-    date: `${dayName}, ${now.toLocaleDateString('ms-MY')}`,
-    location: currentLocationText, // Use the location we got (or fallback)
-    additionalInfo: `Bangunan: ${formData.building_name || 'N/A'}`
-  }
-
-  // Process each image with metadata overlay
+  // No metadata, no location fetching, no validation limits
   for (const file of files) {
     try {
-      console.log('🖼️ Adding metadata overlay to image...')
-      
-      // Add metadata overlay to the image
-      const imageWithMetadata = await addMetadataOverlay(file, metadata)
-      
-      // Add the processed image to state
-      setImages(prev => [...prev, imageWithMetadata])
-      
+      // Add file directly (no overlay)
+      setImages(prev => [...prev, file])
+
       // Create preview
       const reader = new FileReader()
       reader.onload = () => {
         if (reader.result) {
           setImagePreviews(prev => [...prev, reader.result as string])
-          setImageCaptions(prev => [...prev, '']) // Initialize with empty caption
+          setImageCaptions(prev => [...prev, ""]) // default empty caption
         }
-      }
-      reader.onerror = () => {
-        console.error('Failed to read file:', file.name)
-        setImages(prev => prev.filter(f => f !== imageWithMetadata))
-      }
-      reader.readAsDataURL(imageWithMetadata)
-      
-    } catch (error) {
-      console.error('❌ Failed to add metadata overlay:', error)
-      // Fallback: use original image without metadata
-      setImages(prev => [...prev, file])
-      
-      const reader = new FileReader()
-      reader.onload = () => {
-        if (reader.result) {
-          setImagePreviews(prev => [...prev, reader.result as string])
-          setImageCaptions(prev => [...prev, ''])
-        }
-      }
-      reader.onerror = () => {
-        console.error('Failed to read file:', file.name)
-        setImages(prev => prev.filter(f => f !== file))
       }
       reader.readAsDataURL(file)
+
+    } catch (error) {
+      console.error("❌ Failed to process image:", error)
     }
   }
 
-  // Reset file input
+  // Reset input so user can re-upload same file
   if (fileInputRef.current) {
-    fileInputRef.current.value = ''
+    fileInputRef.current.value = ""
   }
 }
+
 
 const handleCaptionChange = (index: number, caption: string) => {
   setImageCaptions(prev => {
@@ -734,7 +667,7 @@ if (draft?.uploaded_images && draft.uploaded_images.length > 0) {
               </label>
 
               <p className="text-xs text-gray-400 mt-1">
-                PNG, JPG sehingga 5MB. Maksimum 5 gambar.
+                PNG, JPG sehingga 5MB.
               </p>
             </div>
             
@@ -743,7 +676,7 @@ if (draft?.uploaded_images && draft.uploaded_images.length > 0) {
 {imagePreviews.length > 0 && (
   <div className="mt-4">
     <h3 className="text-sm font-medium text-gray-700 mb-2">
-      Gambar Dipilih ({imagePreviews.length}/5)
+      Gambar Dipilih ({imagePreviews.length})
     </h3>
     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
       {imagePreviews.map((preview, index) => (
@@ -814,7 +747,7 @@ if (draft?.uploaded_images && draft.uploaded_images.length > 0) {
 
           <div>
             <label className="block text-gray-700 text-sm font-bold mb-2">
-              Cadangan Penyelesaian
+              Gerakan Kerja Awalan
             </label>
             <textarea
               name="solution_suggestion"

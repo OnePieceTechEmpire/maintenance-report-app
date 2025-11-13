@@ -191,38 +191,34 @@ const deleteDraft = async (draftId: string) => {
     alert('Gagal memadam draf')
   }
 }
-
 const viewReceipts = async (completionId: string) => {
   try {
     const { data: completion, error } = await supabase
       .from('completions')
-      .select('completion_images, receipt_images') // Get both
+      .select('completion_images')
       .eq('id', completionId)
       .single()
 
     if (error) throw error
 
-    console.log('📋 All completion images:', completion.completion_images)
-    
-    // ✅ Check BOTH completion_images AND receipt_images for receipts
-    const receiptImages = 
-      completion.receipt_images || // Check receipt_images first
-      completion.completion_images?.filter((img: any) => img.type === 'receipt') || // Then check completion_images
-      []
+    let images = completion.completion_images
 
-    console.log('🧾 Found receipt images:', receiptImages)
+    // 🛠️ FIX: Parse JSON if it's stored as text
+    if (typeof images === 'string') {
+      images = JSON.parse(images)
+    }
+
+    // 🔍 Filter only receipts
+    const receiptImages = images.filter((img: any) => img.type === 'receipt')
 
     if (receiptImages.length === 0) {
       alert('Tiada resit untuk aduan ini')
       return
     }
 
-    const receiptUrls = receiptImages.map((img: any) => img.url)
-    console.log('🔗 Receipt URLs:', receiptUrls)
-    
     // Open first receipt
-    window.open(receiptUrls[0], '_blank')
-    
+    window.open(receiptImages[0].url, '_blank')
+
   } catch (error) {
     console.error('Error viewing receipts:', error)
     alert('Gagal memuat resit')

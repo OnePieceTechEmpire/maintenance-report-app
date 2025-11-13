@@ -1,7 +1,135 @@
 // lib/pdf-generator.ts
 import { PDFDocument, PDFPage, rgb, StandardFonts } from 'pdf-lib'
 
-export async function generateComplaintPDF(complaint: any, logoBytes?: Uint8Array): Promise<Uint8Array> {
+
+/** ---------- COMPLAINT IMAGES (same layout style as completion) ---------- */
+async function addComplaintImages(
+  pdfDoc: PDFDocument,
+  complaint: any,
+  font: any,
+  fontBold: any
+): Promise<void> {
+
+  let images = complaint.image_urls;
+  if (!images || images.length === 0) return;
+
+  // If stored as string
+  if (typeof images === "string") {
+    try { images = JSON.parse(images); }
+    catch { console.error("Invalid complaint image JSON"); return; }
+  }
+
+  const pages = pdfDoc.getPages();
+  const baseSize = pages[0].getSize();
+  const pageWidth = baseSize.width;
+  const pageHeight = baseSize.height;
+
+  // Layout config
+  const imagesPerRow = 2;
+  const maxRowsPerPage = 3;
+  const maxPerPage = 6;
+  const imageBoxSize = 160;
+  const horizontalSpacing = 20;
+  const verticalBlockHeight = imageBoxSize + 40;
+  const topStartY = 720;
+
+  const gridWidth = imagesPerRow * imageBoxSize + (imagesPerRow - 1) * horizontalSpacing;
+  const startX = (pageWidth - gridWidth) / 2;
+
+  for (let i = 0; i < images.length; i++) {
+
+    const pageIndex = Math.floor(i / maxPerPage);
+    const indexOnPage = i % maxPerPage;
+    const row = Math.floor(indexOnPage / imagesPerRow);
+    const col = indexOnPage % imagesPerRow;
+
+    // First image on the page → create new page
+    if (indexOnPage === 0) {
+      const page = pdfDoc.addPage([pageWidth, pageHeight]);
+      let y = topStartY;
+
+      page.drawText(
+        pageIndex === 0 ? "GAMBAR KEJADIAN" : "GAMBAR KEJADIAN (Sambungan)",
+        {
+          x: 55,
+          y,
+          size: 14,
+          font: fontBold,
+          color: rgb(0.1, 0.1, 0.1)
+        }
+      );
+
+      y -= 40;
+
+      complaint.__imgLayout = complaint.__imgLayout || {};
+      complaint.__imgLayout[pageIndex] = { page, startY: y };
+    }
+
+    const { page, startY } = complaint.__imgLayout[pageIndex];
+
+    const imgY = startY - row * verticalBlockHeight;
+    const imgInfo = images[i];
+    const xPos = startX + col * (imageBoxSize + horizontalSpacing);
+
+    try {
+      const bytes = await fetchImage(imgInfo.url);
+      let obj;
+
+      try { obj = await pdfDoc.embedJpg(bytes); }
+      catch { obj = await pdfDoc.embedPng(bytes); }
+
+      const scaled = obj.scaleToFit(imageBoxSize, imageBoxSize);
+      const xOffset = (imageBoxSize - scaled.width) / 2;
+      const yOffset = (imageBoxSize - scaled.height) / 2;
+
+      // Border box
+      page.drawRectangle({
+        x: xPos,
+        y: imgY - imageBoxSize,
+        width: imageBoxSize,
+        height: imageBoxSize,
+        borderColor: rgb(0.8, 0.8, 0.8),
+        borderWidth: 1
+      });
+
+      // Image
+      page.drawImage(obj, {
+        x: xPos + xOffset,
+        y: imgY - imageBoxSize + yOffset,
+        width: scaled.width,
+        height: scaled.height
+      });
+
+      // Caption
+      if (imgInfo.caption) {
+        const captionLines = wrapText(imgInfo.caption, 30);
+        captionLines.forEach((line, idx) => {
+          page.drawText(sanitizeText(line), {
+            x: xPos,
+            y: imgY - imageBoxSize - 15 - idx * 12,
+            size: 8,
+            font,
+            color: rgb(0.3, 0.3, 0.3)
+          });
+        });
+      }
+
+    } catch (e) {
+      console.error("Error loading complaint image", e);
+    }
+  }
+
+  delete complaint.__imgLayout;
+}
+
+
+export async function generateComplaintPDF(
+  complaint: any,
+  logoBytes?: Uint8Array | null,
+  companyName?: string
+): Promise<Uint8Array> {
+
+
   const pdfDoc = await PDFDocument.create()
   const font = await pdfDoc.embedFont(StandardFonts.Helvetica)
   const fontBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold)
@@ -10,7 +138,7 @@ export async function generateComplaintPDF(complaint: any, logoBytes?: Uint8Arra
   let y = 760
 
   // === HEADER SECTION ===
-  y = await addHeader(pdfDoc, currentPage, y, font, fontBold, logoBytes)
+ y = await addHeader(pdfDoc, currentPage, y, font, fontBold, logoBytes, companyName)
 
   // === COMPLAINT DETAILS SECTION ===
   y = addSectionHeader(currentPage, y, 'MAKLUMAT ADUAN', fontBold)
@@ -18,17 +146,21 @@ export async function generateComplaintPDF(complaint: any, logoBytes?: Uint8Arra
 
   // === INCIDENT DESCRIPTION ===
   y = addSectionHeader(currentPage, y, 'DETAIL ADUAN', fontBold)
-  y = addParagraphBlock(currentPage, y, complaint.incident_description, font)
+  let result = addParagraphBlockWithPageBreak(pdfDoc, currentPage, y, complaint.incident_description, font)
+currentPage = result.page
+y = result.y
 
   // === SOLUTION SUGGESTION ===
   if (complaint.solution_suggestion) {
-    y = addSectionHeader(currentPage, y, 'CADANGAN PENYELESAIAN', fontBold)
-    y = addParagraphBlock(currentPage, y, complaint.solution_suggestion, font)
+    y = addSectionHeader(currentPage, y, 'GERAKAN KERJA AWAL', fontBold)
+    let result = addParagraphBlockWithPageBreak(pdfDoc, currentPage, y, complaint.solution_suggestion, font)
+currentPage = result.page
+y = result.y
   }
 
   // === IMAGES SECTION ===
   if (complaint.image_urls && complaint.image_urls.length > 0) {
-    await addComplaintImages(pdfDoc, currentPage, complaint, font, fontBold)
+    await addComplaintImages(pdfDoc, complaint, font, fontBold)
   }
 
   // === FOOTER SECTION ===
@@ -46,16 +178,17 @@ async function addHeader(
   y: number,
   font: any,
   fontBold: any,
-  logoBytes?: Uint8Array
+  logoBytes?: Uint8Array | null,
+  companyName?: string
 ): Promise<number> {
   const { width } = page.getSize()
 
   // Refined banner (slightly lighter blue and taller for breathing room)
   page.drawRectangle({
     x: 0,
-    y: y - 80,
-    width,
-    height: 80,
+  y: y - 80, // shift a bit lower to fit the taller banner
+  width,
+  height: 80, // was 80
     color: rgb(0.16, 0.35, 0.75),
   })
 
@@ -97,6 +230,18 @@ async function addHeader(
     color: rgb(0.92, 0.92, 0.95),
   })
 
+  // Company name (if provided)
+if (companyName) {
+  const companyWidth = fontBold.widthOfTextAtSize(companyName, 12)
+  page.drawText(companyName, {
+    x: (width - companyWidth) / 2,
+    y: y - 75,
+    size: 12,
+    font: fontBold,
+    color: rgb(1, 1, 1),
+  })
+}
+
   // Add a thin bottom border for separation
   page.drawLine({
     start: { x: 40, y: y - 80 },
@@ -135,6 +280,17 @@ function addSectionHeader(page: PDFPage, y: number, title: string, fontBold: any
   return y - 45
 }
 
+
+function sanitizeText(input: string) {
+  if (!input) return ""
+  return input
+    .replace(/→/g, '->')
+    .replace(/—/g, '-')
+    .replace(/[“”]/g, '"')
+    .replace(/[‘’]/g, "'")
+    .replace(/•/g, '-')
+}
+
 // -----------------------------
 // COMPLAINT DETAILS SECTION
 // -----------------------------
@@ -168,7 +324,7 @@ function addComplaintDetails(page: PDFPage, y: number, complaint: any, font: any
       font: fontBold,
       color: rgb(0.25, 0.25, 0.25),
     })
-    page.drawText(item.value || '-', {
+   page.drawText(sanitizeText(item.value) || '-', {
       x: 200,
       y: y - 15,
       size: 10,
@@ -184,13 +340,38 @@ function addComplaintDetails(page: PDFPage, y: number, complaint: any, font: any
 // -----------------------------
 // PARAGRAPH SECTION
 // -----------------------------
-function addParagraphBlock(page: PDFPage, y: number, text: string, font: any): number {
-  const lines = wrapText(text || '-', 85)
-  lines.forEach((line) => {
-    page.drawText(line, { x: 55, y, size: 10, font, color: rgb(0.1, 0.1, 0.1) })
-    y -= 14
-  })
-  return y - 10
+function addParagraphBlockWithPageBreak(
+  pdfDoc: PDFDocument,
+  page: PDFPage,
+  y: number,
+  text: string,
+  font: any
+): { page: PDFPage; y: number } {
+
+  const lines = wrapText(text || "-", 85);
+
+  const { height } = page.getSize();
+  const minBottomMargin = 100;
+
+  for (const line of lines) {
+    if (y < minBottomMargin) {
+      // New page
+      page = pdfDoc.addPage([600, 800]);
+      y = height - 70;
+    }
+
+    page.drawText(sanitizeText(line), {
+      x: 55,
+      y,
+      size: 10,
+      font,
+      color: rgb(0.1, 0.1, 0.1)
+    });
+
+    y -= 14;
+  }
+
+  return { page, y: y - 10 };
 }
 
 // -----------------------------
@@ -232,159 +413,24 @@ function addFooter(pdfDoc: PDFDocument, font: any, fontBold: any): void {
 // UTILITIES
 // -----------------------------
 function wrapText(text: string, maxLength: number): string[] {
-  const words = (text || '').split(' ')
+  const sanitized = sanitizeText(text || "")
+  const words = sanitized.split(" ")
   const lines: string[] = []
-  let current = ''
+  let current = ""
+
   words.forEach((w) => {
     if ((current + w).length > maxLength) {
       lines.push(current.trim())
-      current = w + ' '
-    } else current += w + ' '
+      current = w + " "
+    } else current += w + " "
   })
+
   if (current) lines.push(current.trim())
   return lines
 }
-// Add this function to handle complaint images with captions
-async function addComplaintImages(pdfDoc: PDFDocument, currentPage: PDFPage, complaint: any, font: any, fontBold: any): Promise<void> {
-  let page = currentPage
-  const { width, height } = page.getSize()
-  let y = 750 // Start images on new page or current position
 
-  // If current page has content, start images on new page
-  if (page.getY() < 600) {
-    page = pdfDoc.addPage([600, 800])
-    y = 750
-  }
 
-  // Only add images section if there are images
-  if (!complaint.image_urls || complaint.image_urls.length === 0) {
-    return
-  }
 
-  page.drawText('GAMBAR KEJADIAN', {
-    x: 50, y, size: 14, font: fontBold, color: rgb(0.1, 0.1, 0.1),
-  })
-  y -= 40
-
-  // Image grid settings - same as completion PDF
-  const imagesPerRow = 2
-  const imageSize = 200
-  const spacing = 30
-  const startX = 50
-  
-  for (let i = 0; i < complaint.image_urls.length; i++) {
-    const imageData = complaint.image_urls[i]
-    const row = Math.floor(i / imagesPerRow)
-    const col = i % imagesPerRow
-    
-    // Check if we need a new page
-    const imageY = y - (row * (imageSize + spacing + 40)) // 40 for caption
-    
-    if (imageY - imageSize < 50) {
-      page = pdfDoc.addPage([600, 800])
-      y = 750
-      // Redraw header on new page
-      page.drawText('GAMBAR KEJADIAN (Sambungan)', {
-        x: 50, y, size: 14, font: fontBold, color: rgb(0.1, 0.1, 0.1),
-      })
-      y -= 40
-    }
-    
-    try {
-      const imageBytes = await fetchImage(imageData.url)
-      let image: any
-      
-      try {
-        image = await pdfDoc.embedJpg(imageBytes)
-      } catch {
-        image = await pdfDoc.embedPng(imageBytes)
-      }
-      
-      // Calculate position for this image in the grid
-      const xPos = startX + (col * (imageSize + spacing))
-      const currentY = y - (row * (imageSize + spacing + 40))
-      
-      // Scale image to fit square
-      const scaledDims = image.scaleToFit(imageSize, imageSize)
-      
-      // Center image in the square
-      const xOffset = (imageSize - scaledDims.width) / 2
-      const yOffset = (imageSize - scaledDims.height) / 2
-      
-      // Draw image with border
-      page.drawRectangle({
-        x: xPos,
-        y: currentY - imageSize,
-        width: imageSize,
-        height: imageSize,
-        borderColor: rgb(0.8, 0.8, 0.8),
-        borderWidth: 1,
-      })
-      
-      page.drawImage(image, {
-        x: xPos + xOffset,
-        y: currentY - imageSize + yOffset,
-        width: scaledDims.width,
-        height: scaledDims.height,
-      })
-      
-      // Add caption below image
-      if (imageData.caption) {
-        const captionLines = wrapText(imageData.caption, 30) // Shorter lines for captions
-        captionLines.forEach((line, lineIndex) => {
-          page.drawText(line, {
-            x: xPos,
-            y: currentY - imageSize - 15 - (lineIndex * 12),
-            size: 8,
-            font,
-            color: rgb(0.3, 0.3, 0.3),
-          })
-        })
-      }
-      
-      // Add image number
-      page.drawText(`Gambar ${i + 1}`, {
-        x: xPos,
-        y: currentY - imageSize - ((imageData.caption ? wrapText(imageData.caption, 30).length : 0) * 12) - 25,
-        size: 7,
-        font,
-        color: rgb(0.4, 0.4, 0.4),
-      })
-      
-    } catch (error) {
-      console.error('Error processing complaint image:', imageData.url, error)
-      // Draw placeholder for failed images
-      const xPos = startX + (col * (imageSize + spacing))
-      const currentY = y - (row * (imageSize + spacing + 40))
-      
-      page.drawRectangle({
-        x: xPos,
-        y: currentY - imageSize,
-        width: imageSize,
-        height: imageSize,
-        borderColor: rgb(0.8, 0.8, 0.8),
-        borderWidth: 1,
-        color: rgb(0.95, 0.95, 0.95),
-      })
-      
-      page.drawText('Gagal Muat', {
-        x: xPos + imageSize/2 - 20,
-        y: currentY - imageSize/2 - 5,
-        size: 10,
-        font,
-        color: rgb(0.6, 0.6, 0.6),
-      })
-      
-      page.drawText(`Gambar ${i + 1}`, {
-        x: xPos,
-        y: currentY - imageSize - 15,
-        size: 8,
-        font,
-        color: rgb(0.4, 0.4, 0.4),
-      })
-    }
-  }
-}
 
 
 
