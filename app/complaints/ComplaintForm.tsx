@@ -38,6 +38,8 @@ const searchParams = useSearchParams()
 const debugMode = searchParams.get('debug') === 'true'
 const draftId = searchParams.get('draftId')
 const draftLoadedRef = useRef(false)
+const [showOverlay, setShowOverlay] = useState(false)
+
 
 useEffect(() => {
   if (draftId && !draftLoadedRef.current) {
@@ -52,6 +54,7 @@ useEffect(() => {
 // Update handleSaveDraft function
 const handleSaveDraft = async () => {
   setSavingDraft(true)
+  setShowOverlay(true)
   
   if (debugMode) alert('🚀 START: Saving draft...')
 
@@ -164,12 +167,16 @@ if (isEditingDraft && currentDraftId) {
     alert('Gagal menyimpan draf')
   } finally {
     setSavingDraft(false)
+    setShowOverlay(false)
   }
 }
 
 // Update loadDraft function
 const loadDraft = async (draftId: string) => {
     console.log('🔄 loadDraft called with ID:', draftId) // ADD THIS
+
+      // 🔥 SHOW LOADER
+  setShowOverlay(true)
 
   try {
     const { data: { user } } = await supabase.auth.getUser()
@@ -229,6 +236,10 @@ const loadDraft = async (draftId: string) => {
   } catch (error) {
     console.error('Error loading draft:', error)
     alert('Failed to load draft')
+
+  } finally {
+    // 🔥 ALWAYS HIDE LOADER
+    setShowOverlay(false)
   }
 }
 
@@ -363,6 +374,8 @@ const removeImage = (index: number) => {
 const handleSubmit = async (e: React.FormEvent) => {
   e.preventDefault()
   setLoading(true)
+  setShowOverlay(true)
+  
 
   try {
     const { data: { user } } = await supabase.auth.getUser()
@@ -494,7 +507,7 @@ if (draft?.uploaded_images && draft.uploaded_images.length > 0) {
     alert('Failed to submit complaint')
   } finally {
     setLoading(false)
-    setUploadProgress(0)
+    setShowOverlay(true)
   }
 }
 
@@ -799,6 +812,15 @@ if (draft?.uploaded_images && draft.uploaded_images.length > 0) {
 </div>
         </form>
       </div>
+      {showOverlay && (
+  <div className="fixed inset-0 bg-black bg-opacity-50 backdrop-blur-sm flex flex-col items-center justify-center z-[9999]">
+    <div className="w-12 h-12 border-4 border-white border-t-transparent rounded-full animate-spin"></div>
+    <p className="text-white mt-4 text-lg font-medium animate-pulse">
+      Loading....
+    </p>
+  </div>
+)}
+
     </div>
   )
 }

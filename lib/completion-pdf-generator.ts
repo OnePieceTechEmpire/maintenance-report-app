@@ -230,175 +230,186 @@ async function fetchImage(url: string): Promise<Uint8Array> {
 }
 
 /** ---------- COMPLETION IMAGES (separate pages, centered, max 6 per page) ---------- */
+/** ---------- BEFORE & AFTER IMAGE LAYOUT ---------- */
 async function addCompletionImages(
   pdfDoc: PDFDocument,
   completion: any,
   font: any,
   fontBold: any
 ): Promise<void> {
-  let images = completion.completion_images
 
-  if (!images) return
+  let images = completion.completion_images;
+  if (!images) return;
 
-  // If stored as JSON string, parse first
-  if (typeof images === 'string') {
-    try {
-      images = JSON.parse(images)
-    } catch (e) {
-      console.error('Invalid completion_images JSON:', images)
-      return
-    }
+  // Parse JSON string if needed
+  if (typeof images === "string") {
+    try { images = JSON.parse(images); }
+    catch { return; }
   }
 
-  // Only completion photos (ignore receipts)
-  const completionImages = images.filter((img: any) => img.type === 'completion')
-  if (!completionImages.length) return
+  // Split types
+  const beforeImages = images.filter((img: any) => img.type === "before");
+  const afterImages  = images.filter((img: any) => img.type === "after");
 
-  const pages = pdfDoc.getPages()
-  const basePageSize = pages[0].getSize()
-  const pageWidth = basePageSize.width
-  const pageHeight = basePageSize.height
+  if (!beforeImages.length && !afterImages.length) return;
+
+  // Page size
+  const pages = pdfDoc.getPages();
+  const { width, height } = pages[0].getSize();
 
   // Layout config
-  const imagesPerRow = 2
-  const maxRowsPerPage = 3
-  const maxPerPage = imagesPerRow * maxRowsPerPage // 6
-  const imageBoxSize = 160
-  const horizontalSpacing = 20
-  const verticalBlockHeight = imageBoxSize + 40 // image + caption/label
-  const topStartY = 720
+  const boxSize = 160;
+  const colSpacing = 40;
+  const rowSpacing = 60;
+  const topStartY = 720;
 
-  // Total grid width so we can center it
-  const gridWidth = imagesPerRow * imageBoxSize + (imagesPerRow - 1) * horizontalSpacing
-  const startX = (pageWidth - gridWidth) / 2
+  // Column positions
+  const leftX  = 60;
+  const rightX = width - boxSize - 60;
 
-  for (let i = 0; i < completionImages.length; i++) {
-    const pageIndex = Math.floor(i / maxPerPage) // which images page
-    const indexOnPage = i % maxPerPage
-    const row = Math.floor(indexOnPage / imagesPerRow)
-    const col = indexOnPage % imagesPerRow
+  // Max rows per page
+  const maxRowsPerPage = 3;
 
-    // If first image on this "images page", create page + header
-    if (indexOnPage === 0) {
-      const page = pdfDoc.addPage([pageWidth, pageHeight])
-      let y = topStartY
+  const totalPairs = Math.max(beforeImages.length, afterImages.length);
 
-      page.drawText(
-        pageIndex === 0 ? 'GAMBAR PENYELESAIAN' : 'GAMBAR PENYELESAIAN (Sambungan)',
-        {
-          x: 55,
-          y,
-          size: 14,
-          font: fontBold,
-          color: rgb(0.1, 0.1, 0.1),
-        }
-      )
-      y -= 40
+  for (let i = 0; i < totalPairs; i++) {
+    const rowIndex  = i % maxRowsPerPage;
+    const pageIndex = Math.floor(i / maxRowsPerPage);
 
-      // Store this startY in completion object so we don't re-calc each time
-      completion.__imagesLayout = completion.__imagesLayout || {}
-      completion.__imagesLayout[pageIndex] = { page, startY: y }
+    // --- CREATE NEW PAGE + HEADER ---
+    if (rowIndex === 0) {
+      const page = pdfDoc.addPage([width, height]);
+      let y = topStartY;
+
+      // --- CENTERED PAGE TITLE ---
+      const title =
+        pageIndex === 0
+          ? "GAMBAR KERJA KERJA PENYELENGGARAAN DAN BAIK PULIH"
+          : "GAMBAR KERJA KERJA PENYELENGGARAAN DAN BAIK PULIH";
+
+      const titleWidth = fontBold.widthOfTextAtSize(title, 14);
+
+      page.drawText(title, {
+        x: (width - titleWidth) / 2,   // CENTER ALIGN
+        y,
+        size: 14,
+        font: fontBold,
+        color: rgb(0.1, 0.1, 0.1),
+      });
+
+      y -= 40;
+
+      // --- LABELS ABOVE COLUMNS ---
+      page.drawText("Sebelum", {
+        x: leftX,
+        y,
+        size: 11,
+        font: fontBold,
+        color: rgb(0.2, 0.2, 0.2),
+      });
+
+      page.drawText("Selepas", {
+        x: rightX,
+        y,
+        size: 11,
+        font: fontBold,
+        color: rgb(0.2, 0.2, 0.2),
+      });
+
+      y -= 25;
+
+      // Store reference
+      completion.__pageData = completion.__pageData || {};
+      completion.__pageData[pageIndex] = { page, startY: y };
     }
 
-    const { page, startY } = completion.__imagesLayout[pageIndex]
-    const imageData = completionImages[i]
+    const { page, startY } = completion.__pageData[pageIndex];
 
-    const xPos = startX + col * (imageBoxSize + horizontalSpacing)
-    const currentY = startY - row * verticalBlockHeight
+    const yPos = startY - rowIndex * (boxSize + rowSpacing);
 
-    try {
-      const imageBytes = await fetchImage(imageData.url)
-      let image: any
+    const before = beforeImages[i];
+    const after  = afterImages[i];
 
-      try {
-        image = await pdfDoc.embedJpg(imageBytes)
-      } catch {
-        image = await pdfDoc.embedPng(imageBytes)
-      }
+    // Draw LEFT ("sebelum")
+    await drawImageBox(pdfDoc, page, before, leftX, yPos, boxSize, font);
 
-      // Scale to fit square
-      const scaledDims = image.scaleToFit(imageBoxSize, imageBoxSize)
-      const xOffset = (imageBoxSize - scaledDims.width) / 2
-      const yOffset = (imageBoxSize - scaledDims.height) / 2
-
-      // Border box
-      page.drawRectangle({
-        x: xPos,
-        y: currentY - imageBoxSize,
-        width: imageBoxSize,
-        height: imageBoxSize,
-        borderColor: rgb(0.8, 0.8, 0.8),
-        borderWidth: 1,
-      })
-
-      // Image
-      page.drawImage(image, {
-        x: xPos + xOffset,
-        y: currentY - imageBoxSize + yOffset,
-        width: scaledDims.width,
-        height: scaledDims.height,
-      })
-
-      // Caption
-      if (imageData.caption) {
-        const captionLines = wrapText(imageData.caption, 30)
-        captionLines.forEach((line: string, lineIndex: number) => {
-          page.drawText(line, {
-            x: xPos,
-            y: currentY - imageBoxSize - 15 - lineIndex * 12,
-            size: 8,
-            font,
-            color: rgb(0.3, 0.3, 0.3),
-          })
-        })
-      }
-
-      // Image number
-    //  page.drawText(`Gambar ${i + 1}`, {
-      //  x: xPos,
-       // y:
-      //    currentY -
-        //  imageBoxSize -
-        //  ((imageData.caption ? wrapText(imageData.caption, 30).length : 0) * 12) -
-      //    25,
-    //    size: 7,
-      //  font,
-     //   color: rgb(0.4, 0.4, 0.4),
-     // })
-    } catch (error) {
-      console.error('Error processing completion image:', imageData.url, error)
-      // Placeholder if fail
-      page.drawRectangle({
-        x: xPos,
-        y: currentY - imageBoxSize,
-        width: imageBoxSize,
-        height: imageBoxSize,
-        borderColor: rgb(0.8, 0.8, 0.8),
-        borderWidth: 1,
-        color: rgb(0.95, 0.95, 0.95),
-      })
-
-      page.drawText('Gagal Muat', {
-        x: xPos + imageBoxSize / 2 - 20,
-        y: currentY - imageBoxSize / 2 - 5,
-        size: 10,
-        font,
-        color: rgb(0.6, 0.6, 0.6),
-      })
-
-      page.drawText(`Gambar ${i + 1}`, {
-        x: xPos,
-        y: currentY - imageBoxSize - 15,
-        size: 8,
-        font,
-        color: rgb(0.4, 0.4, 0.4),
-      })
-    }
+    // Draw RIGHT ("selepas")
+    await drawImageBox(pdfDoc, page, after, rightX, yPos, boxSize, font);
   }
 
-  // Clean temp layout
-  delete completion.__imagesLayout
+  delete completion.__pageData;
 }
+
+
+/** Renders 1 image box with caption */
+async function drawImageBox(
+  pdfDoc: PDFDocument,
+  page: PDFPage,
+  imgData: any,
+  x: number,
+  y: number,
+  size: number,
+  font: any
+) {
+  if (!imgData) {
+    // draw an empty placeholder box
+    page.drawRectangle({
+      x,
+      y: y - size,
+      width: size,
+      height: size,
+      borderColor: rgb(0.85, 0.85, 0.85),
+      borderWidth: 1,
+    });
+    return;
+  }
+
+  try {
+    const bytes = await fetchImage(imgData.url);
+    let img;
+
+    try { img = await pdfDoc.embedJpg(bytes); }
+    catch { img = await pdfDoc.embedPng(bytes); }
+
+    const scaled = img.scaleToFit(size, size);
+    const xOff = (size - scaled.width) / 2;
+    const yOff = (size - scaled.height) / 2;
+
+    // Border box
+    page.drawRectangle({
+      x,
+      y: y - size,
+      width: size,
+      height: size,
+      borderColor: rgb(0.8, 0.8, 0.8),
+      borderWidth: 1,
+    });
+
+    // Image
+    page.drawImage(img, {
+      x: x + xOff,
+      y: y - size + yOff,
+      width: scaled.width,
+      height: scaled.height,
+    });
+
+    // Caption
+    if (imgData.caption) {
+      wrapText(imgData.caption, 28).forEach((line, i) => {
+        page.drawText(line, {
+          x,
+          y: y - size - 15 - i * 12,
+          size: 8,
+          font,
+          color: rgb(0.3, 0.3, 0.3),
+        });
+      });
+    }
+  } catch (err) {
+    console.error("Image load error:", err);
+  }
+}
+
 
 /** ---------- MAIN EXPORT ---------- */
 export async function generateCompletionPDF(completion: any): Promise<Uint8Array> {

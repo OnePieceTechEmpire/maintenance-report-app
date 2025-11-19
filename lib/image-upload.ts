@@ -4,6 +4,7 @@ import { supabase } from './supabase'
 import { compressImage, shouldCompressImage } from './image-compression'
 import { ImageWithCaption } from '@/Types'
 
+
 export async function uploadComplaintImages(complaintId: string, images: File[], captions: string[] = []): Promise<ImageWithCaption[]> {
   const imageData: ImageWithCaption[] = []
   
@@ -52,12 +53,16 @@ export async function uploadComplaintImages(complaintId: string, images: File[],
   return imageData
 }
 
-// Add a new function for completion images
+
+
+
+export type CompletionImageType = 'before' | 'after' | 'receipt'
+
 export async function uploadCompletionImages(
   completionId: string, 
   images: File[], 
   captions: string[] = [],
-  folder: 'completion' | 'receipt' = 'completion' // Add this parameter
+  type: CompletionImageType = 'after'   // default = AFTER
 ): Promise<ImageWithCaption[]> {
   const imageData: ImageWithCaption[] = []
   
@@ -74,10 +79,10 @@ export async function uploadCompletionImages(
       }
 
       const fileExt = 'jpg'
-            const fileName = `completions/${completionId}/${folder}/${Date.now()}-${Math.random().toString(36).substring(2)}.${fileExt}`
+      const fileName = `completions/${completionId}/${type}/${Date.now()}-${Math.random().toString(36).substring(2)}.${fileExt}`
       
       const { data, error } = await supabase.storage
-        .from('complaint-images') // Using same bucket, but different folder
+        .from('complaint-images')
         .upload(fileName, imageToUpload)
       
       if (error) throw error
@@ -88,9 +93,9 @@ export async function uploadCompletionImages(
       
       imageData.push({
         url: publicUrl,
-        caption: caption,
-        storage_path: fileName, // Add this for draft cleanup
-        type: folder // Add type to distinguish
+        caption,
+        storage_path: fileName,
+        type       // 🔥 store exact type: 'before' | 'after' | 'receipt'
       })
       
     } catch (error) {
@@ -100,6 +105,7 @@ export async function uploadCompletionImages(
   
   return imageData
 }
+
 
 export function validateImages(files: File[]): string | null {
   if (files.length > 5) {

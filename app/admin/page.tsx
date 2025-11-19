@@ -7,7 +7,7 @@ import { supabase } from '@/lib/supabase'
 export default function AdminPanel() {
   const [users, setUsers] = useState<any[]>([])
   const [companies, setCompanies] = useState<any[]>([])
-  const [activeTab, setActiveTab] = useState<'users' | 'companies' | 'invite'  | 'overview'>('users')
+  const [activeTab, setActiveTab] = useState<'users'  | 'invite'  | 'overview'>('users')
   const [loading, setLoading] = useState(true)
   const [user, setUser] = useState<any>(null)
   const router = useRouter()
@@ -304,7 +304,7 @@ const fetchCompanyStats = async () => {
             >
               User Management ({users.length})
             </button>
-            <button
+          {/*   <button
               onClick={() => setActiveTab('companies')}
               className={`py-2 px-1 border-b-2 font-medium text-sm ${
                 activeTab === 'companies'
@@ -313,7 +313,7 @@ const fetchCompanyStats = async () => {
               }`}
             >
               Companies ({companies.length})
-            </button>
+            </button>*/}
             <button
   onClick={() => setActiveTab('overview')}
   className={`px-4 py-2 border-b-2 ${activeTab === 'overview' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-600'}`}
@@ -576,7 +576,7 @@ const fetchCompanyStats = async () => {
 )}
 
 
-        {/* Companies Tab */}
+        {/* Companies Tab 
         {activeTab === 'companies' && (
           <div className="bg-white shadow rounded-lg overflow-hidden">
             <div className="px-6 py-4 border-b border-gray-200">
@@ -615,7 +615,7 @@ const fetchCompanyStats = async () => {
               </table>
             </div>
           </div>
-        )}
+        )}*/}
       </main>
     </div>
   )

@@ -25,6 +25,11 @@ export default function CompletionForm() {
   const [complaint, setComplaint] = useState<any>(null)
   const [loading, setLoading] = useState(false)
   const [signature, setSignature] = useState('')
+  // NEW: BEFORE images state
+const [beforeImages, setBeforeImages] = useState<File[]>([])
+const [beforeImagePreviews, setBeforeImagePreviews] = useState<string[]>([])
+const [beforeImageCaptions, setBeforeImageCaptions] = useState<string[]>([])
+
   const [completionImages, setCompletionImages] = useState<File[]>([])
   const [completionImagePreviews, setCompletionImagePreviews] = useState<string[]>([])
   const [zoomedImage, setZoomedImage] = useState<string | null>(null)
@@ -44,6 +49,7 @@ const [currentDraftId, setCurrentDraftId] = useState<string | null>(null)
     const [uploadProgress, setUploadProgress] = useState(0)
   const [receiptImages, setReceiptImages] = useState<File[]>([])
 const [receiptImagePreviews, setReceiptImagePreviews] = useState<string[]>([])
+const [showOverlay, setShowOverlay] = useState(false)
 
 
   useEffect(() => {
@@ -63,6 +69,43 @@ useEffect(() => {
     return () => clearTimeout(timer)
   }
 }, [draftId, complaintId])
+
+
+
+const handleBeforeImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const files = Array.from(e.target.files || [])
+
+  // You can add validation here if needed (size / type)
+  for (const file of files) {
+    setBeforeImages(prev => [...prev, file])
+
+    const reader = new FileReader()
+    reader.onload = () => {
+      if (reader.result) {
+        setBeforeImagePreviews(prev => [...prev, reader.result as string])
+        setBeforeImageCaptions(prev => [...prev, '']) // init empty caption
+      }
+    }
+    reader.readAsDataURL(file)
+  }
+
+  e.target.value = ''
+}
+
+const removeBeforeImage = (index: number) => {
+  setBeforeImages(prev => prev.filter((_, i) => i !== index))
+  setBeforeImagePreviews(prev => prev.filter((_, i) => i !== index))
+  setBeforeImageCaptions(prev => prev.filter((_, i) => i !== index))
+}
+
+const handleBeforeCaptionChange = (index: number, caption: string) => {
+  setBeforeImageCaptions(prev => {
+    const next = [...prev]
+    next[index] = caption
+    return next
+  })
+}
+
 
 
 
@@ -211,73 +254,76 @@ const handleCompletionImageUpload = async (e: React.ChangeEvent<HTMLInputElement
 
 const handleSaveDraft = async () => {
   setSavingDraft(true)
+  setShowOverlay(true)
   
   try {
     const { data: { user } } = await supabase.auth.getUser()
-    
-    if (!user) {
-      alert('Please login first')
-      return
-    }
+    if (!user) return alert('Please login first')
+    if (!complaintId) return alert('No complaint selected')
 
-    if (!complaintId) {
-      alert('No complaint selected')
-      return
-    }
-
-    // Upload completion images to storage
-    let uploadedCompletionImages: any[] = []
-    if (completionImages.length > 0) {
+    // BEFORE IMAGES
+    let uploadedBeforeImages: any[] = []
+    if (beforeImages.length > 0) {
       const { uploadDraftImages } = await import('@/lib/draft-image-utils')
-      uploadedCompletionImages = await uploadDraftImages(user.id, completionImages, 'completion') // Add folder
-      
-      // Add captions and type to uploaded images
-      uploadedCompletionImages = uploadedCompletionImages.map((img, index) => ({
+      uploadedBeforeImages = await uploadDraftImages(user.id, beforeImages, 'before')
+      uploadedBeforeImages = uploadedBeforeImages.map((img, index) => ({
         ...img,
-        caption: completionImageCaptions[index] || '',
-        type: 'completion' // Add type
+        caption: beforeImageCaptions[index] || '',
+        type: 'before'
       }))
     }
 
-    // Upload receipt images to storage
+    // AFTER IMAGES
+    let uploadedAfterImages: any[] = []
+    if (completionImages.length > 0) {
+      const { uploadDraftImages } = await import('@/lib/draft-image-utils')
+      uploadedAfterImages = await uploadDraftImages(user.id, completionImages, 'after')
+      uploadedAfterImages = uploadedAfterImages.map((img, index) => ({
+        ...img,
+        caption: completionImageCaptions[index] || '',
+        type: 'after'
+      }))
+    }
+
+    // RECEIPTS
     let uploadedReceiptImages: any[] = []
     if (receiptImages.length > 0) {
       const { uploadDraftImages } = await import('@/lib/draft-image-utils')
-      uploadedReceiptImages = await uploadDraftImages(user.id, receiptImages, 'receipt') // Different folder
-      
-      // Add default caption and type for receipts
-      uploadedReceiptImages = uploadedReceiptImages.map((img, index) => ({
+      uploadedReceiptImages = await uploadDraftImages(user.id, receiptImages, 'receipt')
+      uploadedReceiptImages = uploadedReceiptImages.map((img) => ({
         ...img,
-        caption: 'Receipt', // Default caption for receipts
-        type: 'receipt' // Add type
+        caption: 'Receipt',
+        type: 'receipt'
       }))
     }
 
-    // Combine all images
-    const allUploadedImages = [...uploadedCompletionImages, ...uploadedReceiptImages]
+    const allUploadedImages = [
+      ...uploadedBeforeImages,
+      ...uploadedAfterImages,
+      ...uploadedReceiptImages
+    ]
 
     const draftData = {
       form_data: formData,
-      uploaded_images: allUploadedImages, // Use combined images
-      signature: signature
+      uploaded_images: allUploadedImages,
+      signature
     }
 
     if (isEditingDraft && currentDraftId) {
-      // Delete old images if they exist
+      // Remove old draft images
       const { data: oldDraft } = await supabase
         .from('completion_drafts')
         .select('uploaded_images')
         .eq('id', currentDraftId)
         .single()
 
-      if (oldDraft?.uploaded_images && oldDraft.uploaded_images.length > 0) {
-        const pathsToDelete = oldDraft.uploaded_images.map((img: any) => img.storage_path)
-        await supabase.storage
-          .from('draft-images')
-          .remove(pathsToDelete)
-      }
+if (Array.isArray(oldDraft?.uploaded_images) && oldDraft.uploaded_images.length > 0) {
+  await supabase.storage
+    .from('draft-images')
+    .remove(oldDraft.uploaded_images.map((img: any) => img.storage_path))
+}
 
-      // Update existing draft
+      // Update draft
       const { error } = await supabase
         .from('completion_drafts')
         .update({
@@ -290,18 +336,18 @@ const handleSaveDraft = async () => {
 
       if (error) throw error
       alert('Draf penyelesaian berjaya dikemas kini!')
-    } else {
+    } 
+    
+    else {
       // Create new draft
       const { data, error } = await supabase
         .from('completion_drafts')
-        .insert([
-          {
-            user_id: user.id,
-            complaint_id: complaintId,
-            form_data: draftData.form_data,
-            uploaded_images: draftData.uploaded_images
-          }
-        ])
+        .insert([{
+          user_id: user.id,
+          complaint_id: complaintId,
+          form_data: draftData.form_data,
+          uploaded_images: draftData.uploaded_images
+        }])
         .select()
 
       if (error) throw error
@@ -309,23 +355,24 @@ const handleSaveDraft = async () => {
       setIsEditingDraft(true)
       alert('Draf penyelesaian berjaya disimpan!')
     }
-    
+
   } catch (error) {
     console.error('Error saving completion draft:', error)
     alert('Gagal menyimpan draf penyelesaian')
   } finally {
     setSavingDraft(false)
+    setShowOverlay(false)
   }
 }
 
+
 const loadCompletionDraft = async (draftId: string) => {
+
+    // 🔥 SHOW LOADER
+  setShowOverlay(true)
   try {
     const { data: { user } } = await supabase.auth.getUser()
-    
-    if (!user) {
-      alert('Please login first')
-      return
-    }
+    if (!user) return alert('Please login first')
 
     const { data: draft, error } = await supabase
       .from('completion_drafts')
@@ -335,81 +382,72 @@ const loadCompletionDraft = async (draftId: string) => {
       .single()
 
     if (error) throw error
-    if (!draft) {
-      alert('Completion draft not found')
-      return
-    }
+    if (!draft) return alert('Completion draft not found')
 
     // Load form data
     setFormData(draft.form_data)
     setSignature(draft.form_data.signature || '')
-    
-     // Load images from storage
-    if (draft.uploaded_images && draft.uploaded_images.length > 0) {
+
+    if (draft.uploaded_images?.length > 0) {
+
       const { downloadDraftImages } = await import('@/lib/draft-image-utils')
-      
-      try {
-        const downloadedFiles = await downloadDraftImages(draft.uploaded_images)
-        
-// ✅ FIX: SEPARATE COMPLETION IMAGES FROM RECEIPT IMAGES
-const completionImageData: any[] = []
-const receiptImageData: any[] = []
-        
-        draft.uploaded_images.forEach((img: any, index: number) => {
-          if (img.type === 'completion') {
-            completionImageData.push({
-              file: downloadedFiles[index],
-              preview: img.preview,
-              caption: img.caption || ''
-            })
-          } else if (img.type === 'receipt') {
-            receiptImageData.push({
-              file: downloadedFiles[index],
-              preview: img.preview,
-              caption: img.caption || ''
-            })
-          }
-        })
+      const downloadedFiles = await downloadDraftImages(draft.uploaded_images)
 
-        // ✅ Set completion images only
-        setCompletionImages(completionImageData.map(item => item.file))
-        setCompletionImagePreviews(completionImageData.map(item => item.preview))
-        setCompletionImageCaptions(completionImageData.map(item => item.caption))
+      // TEMP ARRAYS
+      const beforeData: any[] = []
+      const afterData: any[] = []
+      const receiptData: any[] = []
 
-        // ✅ Set receipt images only  
-        setReceiptImages(receiptImageData.map(item => item.file))
-        setReceiptImagePreviews(receiptImageData.map(item => item.preview))
-        
-      } catch (error) {
-        console.error('Error loading completion draft images:', error)
-        alert('Some images could not be loaded from draft')
-      }
+      draft.uploaded_images.forEach((img: any, index: number) => {
+        const entry = {
+          file: downloadedFiles[index],
+          preview: img.preview,
+          caption: img.caption || ''
+        }
+
+        if (img.type === 'before') beforeData.push(entry)
+        else if (img.type === 'after') afterData.push(entry)
+        else if (img.type === 'receipt') receiptData.push(entry)
+      })
+
+      // SET BEFORE
+      setBeforeImages(beforeData.map(i => i.file))
+      setBeforeImagePreviews(beforeData.map(i => i.preview))
+      setBeforeImageCaptions(beforeData.map(i => i.caption))
+
+      // SET AFTER
+      setCompletionImages(afterData.map(i => i.file))
+      setCompletionImagePreviews(afterData.map(i => i.preview))
+      setCompletionImageCaptions(afterData.map(i => i.caption))
+
+      // SET RECEIPTS
+      setReceiptImages(receiptData.map(i => i.file))
+      setReceiptImagePreviews(receiptData.map(i => i.preview))
     }
-
 
     setCurrentDraftId(draft.id)
     setIsEditingDraft(true)
-    
     alert('Completion draft loaded successfully!')
-    
+
   } catch (error) {
     console.error('Error loading completion draft:', error)
     alert('Failed to load completion draft')
+    
+  } finally {
+    // 🔥 ALWAYS HIDE LOADER
+    setShowOverlay(false)
   }
 }
+
 
 const deleteCompletionDraft = async () => {
   if (!currentDraftId) return
   
   try {
     const { data: { user } } = await supabase.auth.getUser()
-    
-    if (!user) {
-      alert('Please login first')
-      return
-    }
+    if (!user) return alert('Please login first')
 
-    // Get draft to access image info
+    // Fetch images
     const { data: draft } = await supabase
       .from('completion_drafts')
       .select('uploaded_images')
@@ -417,15 +455,14 @@ const deleteCompletionDraft = async () => {
       .eq('user_id', user.id)
       .single()
 
-    // Delete images from storage if they exist
-    if (draft?.uploaded_images && draft.uploaded_images.length > 0) {
-      const pathsToDelete = draft.uploaded_images.map((img: any) => img.storage_path)
-      await supabase.storage
-        .from('draft-images')
-        .remove(pathsToDelete)
-    }
+    // Delete from bucket
+if (Array.isArray(draft?.uploaded_images) && draft.uploaded_images.length > 0) {
+  await supabase.storage
+    .from('draft-images')
+    .remove(draft.uploaded_images.map((img: any) => img.storage_path))
+}
 
-    // Delete the draft record
+    // Delete draft record
     const { error } = await supabase
       .from('completion_drafts')
       .delete()
@@ -434,30 +471,24 @@ const deleteCompletionDraft = async () => {
 
     if (error) throw error
 
-    // Reset form but keep complaint data
-    setFormData(prev => ({
-      ...prev,
-      work_title: `Penyelenggaraan - ${complaint?.building_name}`,
-      work_location: complaint?.incident_location || '',
-      completion_date: new Date().toISOString().split('T')[0],
-      company_name: '',
-      work_order_number: '',
-      officer_name: '',
-      supervisor_name: '',
-      work_scope: '',
-      quantity: '',
-      materials_equipment: '',
-      worker_count: '',
-    }))
-    setSignature('')
+    // RESET FORM — including BEFORE + AFTER
+    setBeforeImages([])
+    setBeforeImagePreviews([])
+    setBeforeImageCaptions([])
+
     setCompletionImages([])
     setCompletionImagePreviews([])
     setCompletionImageCaptions([])
+
+    setReceiptImages([])
+    setReceiptImagePreviews([])
+
+    setSignature('')
     setCurrentDraftId(null)
     setIsEditingDraft(false)
-    
+
     alert('Completion draft deleted successfully!')
-    
+
   } catch (error) {
     console.error('Error deleting completion draft:', error)
     alert('Failed to delete completion draft')
@@ -467,6 +498,7 @@ const deleteCompletionDraft = async () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setLoading(true)
+    setShowOverlay(true)
 
     try {
       // Get current user
@@ -522,16 +554,27 @@ const deleteCompletionDraft = async () => {
 
       if (error) throw error
 
-      // Upload completion images with captions
-      let completionImageData: ImageWithCaption[] = []
-      if (completionImages.length > 0) {
-        completionImageData = await uploadCompletionImages(
-          completion[0].id, 
-          completionImages, 
-          completionImageCaptions,
-                  'completion' // Specify folder
-        )
-      }
+  // BEFORE images
+let beforeImageData: ImageWithCaption[] = []
+if (beforeImages.length > 0) {
+  beforeImageData = await uploadCompletionImages(
+    completion[0].id,
+    beforeImages,
+    beforeImageCaptions,
+    'before'
+  )
+}
+
+// AFTER images (your existing completionImages)
+let afterImageData: ImageWithCaption[] = []
+if (completionImages.length > 0) {
+  afterImageData = await uploadCompletionImages(
+    completion[0].id,
+    completionImages,
+    completionImageCaptions,
+    'after'
+  )
+}
 
           // Upload receipt images
     let receiptImageData: ImageWithCaption[] = []
@@ -546,7 +589,12 @@ const deleteCompletionDraft = async () => {
 
     
     // Combine both image types
-    const allImages = [...completionImageData, ...receiptImageData]
+    // Combine all
+const allImages = [
+  ...beforeImageData,
+  ...afterImageData,
+  ...receiptImageData,
+]
 
     // Update completion with all images
     const { error: updateCompletionError } = await supabase
@@ -627,7 +675,7 @@ if (isEditingDraft && currentDraftId) {
       alert('Failed to submit completion form')
     } finally {
       setLoading(false)
-          setUploadProgress(0)
+      setShowOverlay(false)
     }
   }
 
@@ -785,6 +833,78 @@ if (isEditingDraft && currentDraftId) {
             />
           </div>
 
+{/* NEW: Before Images Section */}
+<div className="mb-6">
+  <label className="block text-gray-700 text-sm font-bold mb-2">
+    Gambar Sebelum Pembaikan
+  </label>
+
+  <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center">
+    <input
+      type="file"
+      multiple
+      accept="image/*"
+      onChange={handleBeforeImageUpload}
+      className="hidden"
+      id="before-image-upload"
+    />
+    <label
+      htmlFor="before-image-upload"
+      className="cursor-pointer bg-slate-500 text-white px-4 py-2 rounded hover:bg-slate-600 inline-block mb-2"
+    >
+      Pilih Gambar Sebelum
+    </label>
+    <p className="text-xs text-gray-400 mt-1">
+      PNG, JPG sehingga 5MB. Tiada had bilangan buat masa ini.
+    </p>
+  </div>
+
+  {beforeImagePreviews.length > 0 && (
+    <div className="mt-4">
+      <h3 className="text-sm font-medium text-gray-700 mb-2">
+        Gambar Sebelum ({beforeImagePreviews.length})
+      </h3>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {beforeImagePreviews.map((preview, index) => (
+          <div key={index} className="border rounded-lg p-3 bg-gray-50">
+            <div className="relative mb-3">
+              <div
+                className="relative h-48 bg-gray-100 rounded border overflow-hidden cursor-pointer"
+                onClick={() => setZoomedImage(preview)}
+              >
+                <img
+                  src={preview}
+                  alt={`Before preview ${index + 1}`}
+                  className="w-full h-full object-contain"
+                />
+              </div>
+              <button
+                type="button"
+                onClick={() => removeBeforeImage(index)}
+                className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full w-6 h-6 text-xs"
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="mt-2">
+              <label className="block text-xs text-gray-600 mb-1">
+                Keterangan Gambar Sebelum {index + 1}:
+              </label>
+              <input
+                type="text"
+                value={beforeImageCaptions[index] || ''}
+                onChange={(e) => handleBeforeCaptionChange(index, e.target.value)}
+                placeholder="e.g., Keadaan sebelum pembaikan"
+                className="w-full px-2 py-1 text-sm border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+              />
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )}
+</div>
 
                   {/* NEW: Completion Images Section */}
           <div>
@@ -804,7 +924,7 @@ if (isEditingDraft && currentDraftId) {
                 htmlFor="completion-image-upload"
                 className="cursor-pointer bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600 inline-block mb-2"
               >
-                Pilih Gambar
+                Pilih Gambar Selepas
               </label>
               <p className="text-xs text-gray-400 mt-1">
                 PNG, JPG, GIF sehingga 5MB.
@@ -905,7 +1025,7 @@ if (isEditingDraft && currentDraftId) {
       Upload Resit
     </label>
     <p className="text-xs text-gray-600">
-      PNG, JPG sehingga 5MB. {receiptImages.length}/5 resit.
+      PNG, JPG sehingga 5MB. {receiptImages.length}
     </p>
   </div>
   
@@ -995,6 +1115,15 @@ if (isEditingDraft && currentDraftId) {
 </div>
         </form>
       </div>
+      {showOverlay && (
+  <div className="fixed inset-0 bg-black bg-opacity-50 backdrop-blur-sm flex flex-col items-center justify-center z-[9999]">
+    <div className="w-12 h-12 border-4 border-white border-t-transparent rounded-full animate-spin"></div>
+    <p className="text-white mt-4 text-lg font-medium animate-pulse">
+      Loading....
+    </p>
+  </div>
+)}
+
     </div>
   )
 }

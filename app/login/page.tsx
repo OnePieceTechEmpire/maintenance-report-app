@@ -145,7 +145,7 @@ export default function Login() {
           }}
           className="w-full mt-4 text-blue-500 hover:text-blue-600 text-center"
         >
-          {isSignUp ? 'Already have an account? Login' : 'Need an account? Register'}
+
         </button>
       </div>
     </div>

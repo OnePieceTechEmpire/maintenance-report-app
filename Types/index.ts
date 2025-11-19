@@ -28,6 +28,11 @@ export interface Complaint {
     username: string;
   }
     hasCompletionDraft?: boolean // Add this
+      // ⭐ NEW FIELDS FOR DRAFT LOGIC ⭐
+  hasDraft?: boolean
+  isMyDraft?: boolean
+  draftOwnerName?: string | null
+  draftId?: string | null
 }
 
 export interface ComplaintFormData {

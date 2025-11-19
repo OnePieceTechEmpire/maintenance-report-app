@@ -16,6 +16,9 @@ export default function Dashboard() {
 const [drafts, setDrafts] = useState<any[]>([])
 const [completionDrafts, setCompletionDrafts] = useState<any[]>([]) // Add this
 const [activeTab, setActiveTab] = useState<'complaints' | 'drafts' | 'completion-drafts'>('complaints') // Update this
+const [receiptViewerOpen, setReceiptViewerOpen] = useState(false)
+const [receiptViewerImages, setReceiptViewerImages] = useState<string[]>([])
+const [zoomedReceipt, setZoomedReceipt] = useState<string | null>(null)
 
 
 
@@ -191,6 +194,7 @@ const deleteDraft = async (draftId: string) => {
     alert('Gagal memadam draf')
   }
 }
+
 const viewReceipts = async (completionId: string) => {
   try {
     const { data: completion, error } = await supabase
@@ -203,12 +207,12 @@ const viewReceipts = async (completionId: string) => {
 
     let images = completion.completion_images
 
-    // 🛠️ FIX: Parse JSON if it's stored as text
+    // Parse JSON
     if (typeof images === 'string') {
       images = JSON.parse(images)
     }
 
-    // 🔍 Filter only receipts
+    // Get receipt images
     const receiptImages = images.filter((img: any) => img.type === 'receipt')
 
     if (receiptImages.length === 0) {
@@ -216,14 +220,16 @@ const viewReceipts = async (completionId: string) => {
       return
     }
 
-    // Open first receipt
-    window.open(receiptImages[0].url, '_blank')
+    // 👉 OPEN RECEIPT VIEWER MODAL
+    setReceiptViewerImages(receiptImages.map((img: any) => img.url))
+    setReceiptViewerOpen(true)
 
   } catch (error) {
     console.error('Error viewing receipts:', error)
     alert('Gagal memuat resit')
   }
 }
+
 
 const checkUser = async () => {
   const { data: { user: authUser } } = await supabase.auth.getUser()
@@ -317,17 +323,18 @@ const fetchComplaints = async () => {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return
 
+    // 1️⃣ Get user's company
     const { data: profile } = await supabase
-      .from('profiles')
-      .select('company_id')
-      .eq('id', user.id)
+      .from("profiles")
+      .select("company_id, full_name")
+      .eq("id", user.id)
       .single()
 
     if (!profile?.company_id) return
 
-    // Fetch complaints
+    // 2️⃣ Fetch complaints for that company
     const { data: complaintsData, error } = await supabase
-      .from('complaints')
+      .from("complaints")
       .select(`
         *,
         profiles:submitted_by (
@@ -335,46 +342,77 @@ const fetchComplaints = async () => {
           username
         )
       `)
-      .eq('company_id', profile.company_id)
-      .order('created_at', { ascending: false })
+      .eq("company_id", profile.company_id)
+      .order("created_at", { ascending: false })
 
     if (error) throw error
 
-    // Fetch completion drafts for the current user
+    // 3️⃣ Fetch ALL drafts for these complaints
     const { data: draftData } = await supabase
-      .from('completion_drafts')
-      .select('complaint_id')
-      .eq('user_id', user.id)
+      .from("completion_drafts")
+      .select(`
+        id,
+        complaint_id,
+        user_id,
+        profiles:user_id (
+          full_name
+        )
+      `)
+      .in("complaint_id", complaintsData.map(c => c.id))
 
-    // Create a Set of complaint IDs that have drafts
-    const complaintIdsWithDrafts = new Set(draftData?.map(draft => draft.complaint_id) || [])
+    // 4️⃣ SAFE map for drafts
+    const draftsByComplaint: Record<string, {
+      id: string,
+      user_id: string,
+      owner_name: string
+    }> = {}
 
-    // Add hasDraft property to each complaint
-    const complaintsWithDraftInfo = complaintsData?.map(complaint => ({
-      ...complaint,
-      hasCompletionDraft: complaintIdsWithDrafts.has(complaint.id)
-    })) || []
+    draftData?.forEach((draft: any) => {
+      draftsByComplaint[draft.complaint_id] = {
+        id: draft.id,
+        user_id: draft.user_id,
+        owner_name: draft.profiles?.full_name || "Unknown"
+      }
+    })
 
-    setComplaints(complaintsWithDraftInfo)
+    // 5️⃣ Merge into complaint list safely
+    const merged = complaintsData.map((complaint: any) => {
+      const draft = draftsByComplaint[complaint.id]
+
+      return {
+        ...complaint,
+        hasDraft: !!draft,
+        isMyDraft: draft?.user_id === user.id,
+        draftId: draft?.id || null,
+        draftOwnerName: draft?.owner_name || null
+      }
+    })
+
+    setComplaints(merged)
+
   } catch (error) {
-    console.error('Error fetching complaints:', error)
+    console.error("Error fetching complaints:", error)
   } finally {
     setLoading(false)
   }
 }
 
+
+
 const handleMarkComplete = (complaintId: string) => {
-  // Check if there's already a draft for this complaint
-  const existingDraft = completionDrafts.find(draft => draft.complaint_id === complaintId)
-  
-  if (existingDraft) {
-    // If draft exists, go to edit the draft
-    router.push(`/completions/new?complaintId=${complaintId}&draftId=${existingDraft.id}`)
+  const complaint = complaints.find(c => c.id === complaintId)
+
+  if (!complaint) return
+
+  if (complaint.hasDraft && complaint.isMyDraft) {
+    // Continue YOUR draft
+    router.push(`/completions/new?complaintId=${complaintId}&draftId=${complaint.draftId}`)
   } else {
-    // If no draft, create new completion
+    // Start a new completion
     router.push(`/completions/new?complaintId=${complaintId}`)
   }
 }
+
 
 // Add this function to download completion PDF
 const downloadCompletionPDF = async (completionId: string, fileName: string) => {
@@ -560,35 +598,43 @@ const downloadCompletionPDF = async (completionId: string, fileName: string) => 
       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
         {new Date(complaint.incident_date).toLocaleDateString()}
       </td>
-      <td className="px-6 py-4 whitespace-nowrap">
-        {complaint.status === 'pending' ? (
-          complaint.hasCompletionDraft ? (
-            // Draft exists - show "Draft in Progress"
-            <button
-              onClick={() => handleMarkComplete(complaint.id)}
-              className="bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-xs font-semibold hover:bg-blue-200 cursor-pointer"
-            >
-              Draft in Progress
-            </button>
-          ) : (
-            // No draft - show "Pending"
-            <button
-              onClick={() => handleMarkComplete(complaint.id)}
-              className="bg-yellow-100 text-yellow-800 px-3 py-1 rounded-full text-xs font-semibold hover:bg-yellow-200 cursor-pointer"
-            >
-              Pending
-            </button>
-          )
-        ) : (
-          // Completed
-          <span className="bg-green-100 text-green-800 px-3 py-1 rounded-full text-xs font-semibold">
-            Completed
-          </span>
-        )}
-      </td>
+ <td className="px-6 py-4 whitespace-nowrap">
+  {complaint.status === "pending" ? (
+    complaint.hasDraft ? (
+      complaint.isMyDraft ? (
+        // YOU OWN THIS DRAFT
+        <button
+          onClick={() => handleMarkComplete(complaint.id)}
+          className="bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-xs font-semibold hover:bg-blue-200"
+        >
+          Continue Draft
+        </button>
+      ) : (
+        // OTHER STAFF OWNS THIS DRAFT
+        <span className="bg-gray-200 text-gray-600 px-3 py-1 rounded-full text-xs font-semibold cursor-not-allowed">
+          Draft by {complaint.draftOwnerName}
+        </span>
+      )
+    ) : (
+      // NO DRAFT EXIST
+      <button
+        onClick={() => handleMarkComplete(complaint.id)}
+        className="bg-yellow-100 text-yellow-800 px-3 py-1 rounded-full text-xs font-semibold hover:bg-yellow-200"
+      >
+        Pending
+      </button>
+    )
+  ) : (
+    <span className="bg-green-100 text-green-800 px-3 py-1 rounded-full text-xs font-semibold">
+      Completed
+    </span>
+  )}
+</td>
       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
         {complaint.profiles?.full_name || 'Unknown'}
       </td>
+
+
 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
   {/* PDF Dropdown - Available for ALL complaints */}
   <div className="relative inline-block text-left">
@@ -643,6 +689,51 @@ const downloadCompletionPDF = async (completionId: string, fileName: string) => 
               Lihat Resit
             </button>
           )}
+          
+          {/* Receipt Viewer Modal */}
+{receiptViewerOpen && (
+  <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50 p-4">
+    <div className="bg-white rounded-lg p-4 max-w-3xl w-full shadow-lg relative">
+
+      {/* Close button */}
+      <button
+        onClick={() => setReceiptViewerOpen(false)}
+        className="absolute top-2 right-2 text-gray-600 hover:text-black"
+      >
+        ✕
+      </button>
+
+      <h2 className="text-lg font-semibold mb-4">Resit Pembelian</h2>
+
+      {/* Grid of receipts */}
+      <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+        {receiptViewerImages.map((url, index) => (
+          <div 
+            key={index} 
+            className="cursor-pointer border rounded-lg overflow-hidden hover:opacity-80"
+            onClick={() => setZoomedReceipt(url)}
+          >
+            <img src={url} className="w-full h-32 object-cover" />
+          </div>
+        ))}
+      </div>
+    </div>
+  </div>
+)}
+
+{/* Zoom Modal */}
+{zoomedReceipt && (
+  <div 
+    className="fixed inset-0 bg-black bg-opacity-80 flex items-center justify-center z-50 p-4"
+    onClick={() => setZoomedReceipt(null)}
+  >
+    <img 
+      src={zoomedReceipt} 
+      className="max-w-full max-h-full object-contain rounded shadow-lg"
+    />
+  </div>
+)}
+
           
           {/* Delete - Always Available */}
           <button
