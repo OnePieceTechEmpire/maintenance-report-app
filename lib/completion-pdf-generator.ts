@@ -28,16 +28,18 @@ async function addHeader(
   page: PDFPage,
   y: number,
   font: any,
-  fontBold: any
+  fontBold: any,
+  completion?: any
 ): Promise<number> {
+
   const { width } = page.getSize()
 
   // Blue banner
   page.drawRectangle({
     x: 0,
-    y: y - 80,
+    y: y - 90,
     width,
-    height: 80,
+    height: 90,
     color: rgb(0.16, 0.35, 0.75),
   })
 
@@ -52,27 +54,33 @@ async function addHeader(
     color: rgb(1, 1, 1),
   })
 
-  // Subtext
-  const subText = `Dijana pada: ${new Date().toLocaleDateString('ms-MY')}`
-  const subTextWidth = font.widthOfTextAtSize(subText, 10)
-  page.drawText(subText, {
-    x: (width - subTextWidth) / 2,
+  // Date
+  const dateText = `Dijana pada: ${new Date().toLocaleDateString('ms-MY')}`
+  const dateWidth = font.widthOfTextAtSize(dateText, 10)
+  page.drawText(dateText, {
+    x: (width - dateWidth) / 2,
     y: y - 58,
     size: 10,
     font,
     color: rgb(0.92, 0.92, 0.95),
   })
 
-  // Bottom border
-  page.drawLine({
-    start: { x: 40, y: y - 80 },
-    end: { x: width - 40, y: y - 80 },
-    thickness: 1,
-    color: rgb(0.8, 0.8, 0.8),
+  // 🔥 NEW — COMPANY NAME
+  const comp = completion?.company_name || "Tidak dinyatakan"
+  const compText = `Syarikat: ${comp}`
+  const compWidth = font.widthOfTextAtSize(compText, 10)
+
+  page.drawText(compText, {
+    x: (width - compWidth) / 2,
+    y: y - 74,
+    size: 10,
+    font,
+    color: rgb(0.92, 0.92, 0.95),
   })
 
-  return y - 100
+  return y - 110
 }
+
 
 /** ---------- SECTION HEADER (grey bar) ---------- */
 function addSectionHeader(page: PDFPage, y: number, title: string, fontBold: any): number {
@@ -241,104 +249,70 @@ async function addCompletionImages(
   let images = completion.completion_images;
   if (!images) return;
 
-  // Parse JSON string if needed
   if (typeof images === "string") {
-    try { images = JSON.parse(images); }
-    catch { return; }
+    try { images = JSON.parse(images); } catch { return; }
   }
 
-  // Split types
   const beforeImages = images.filter((img: any) => img.type === "before");
   const afterImages  = images.filter((img: any) => img.type === "after");
 
-  if (!beforeImages.length && !afterImages.length) return;
-
-  // Page size
   const pages = pdfDoc.getPages();
   const { width, height } = pages[0].getSize();
 
-  // Layout config
-  const boxSize = 160;
-  const colSpacing = 40;
-  const rowSpacing = 60;
-  const topStartY = 720;
+  // 🔥 NEW smaller box
+  const boxSize = 145;
 
-  // Column positions
+  // 🔥 More efficient spacing
+  const rowSpacing = 20;
+  const captionHeight = 35;
+
+  const startY = 720;
+
   const leftX  = 60;
   const rightX = width - boxSize - 60;
 
-  // Max rows per page
-  const maxRowsPerPage = 3;
-
+  const maxRows = 3;
   const totalPairs = Math.max(beforeImages.length, afterImages.length);
 
   for (let i = 0; i < totalPairs; i++) {
-    const rowIndex  = i % maxRowsPerPage;
-    const pageIndex = Math.floor(i / maxRowsPerPage);
+    const rowIndex = i % maxRows;
+    const pageIndex = Math.floor(i / maxRows);
 
-    // --- CREATE NEW PAGE + HEADER ---
     if (rowIndex === 0) {
       const page = pdfDoc.addPage([width, height]);
-      let y = topStartY;
+      let y = startY;
 
-      // --- CENTERED PAGE TITLE ---
-      const title =
-        pageIndex === 0
-          ? "GAMBAR KERJA KERJA PENYELENGGARAAN DAN BAIK PULIH"
-          : "GAMBAR KERJA KERJA PENYELENGGARAAN DAN BAIK PULIH";
-
-      const titleWidth = fontBold.widthOfTextAtSize(title, 14);
+      const title = "GAMBAR SEBELUM DAN SELEPAS KERJA";
+      const tW = fontBold.widthOfTextAtSize(title, 14);
 
       page.drawText(title, {
-        x: (width - titleWidth) / 2,   // CENTER ALIGN
+        x: (width - tW) / 2,
         y,
         size: 14,
         font: fontBold,
-        color: rgb(0.1, 0.1, 0.1),
       });
 
       y -= 40;
 
-      // --- LABELS ABOVE COLUMNS ---
-      page.drawText("Sebelum", {
-        x: leftX,
-        y,
-        size: 11,
-        font: fontBold,
-        color: rgb(0.2, 0.2, 0.2),
-      });
-
-      page.drawText("Selepas", {
-        x: rightX,
-        y,
-        size: 11,
-        font: fontBold,
-        color: rgb(0.2, 0.2, 0.2),
-      });
+      page.drawText("Sebelum", { x: leftX, y, size: 11, font: fontBold });
+      page.drawText("Selepas", { x: rightX, y, size: 11, font: fontBold });
 
       y -= 25;
 
-      // Store reference
-      completion.__pageData = completion.__pageData || {};
-      completion.__pageData[pageIndex] = { page, startY: y };
+      completion.__pageData ??= {};
+      completion.__pageData[pageIndex] = { page, y };
     }
 
-    const { page, startY } = completion.__pageData[pageIndex];
+    const { page, y } = completion.__pageData[pageIndex];
+    const rowY = y - rowIndex * (boxSize + captionHeight + rowSpacing);
 
-    const yPos = startY - rowIndex * (boxSize + rowSpacing);
-
-    const before = beforeImages[i];
-    const after  = afterImages[i];
-
-    // Draw LEFT ("sebelum")
-    await drawImageBox(pdfDoc, page, before, leftX, yPos, boxSize, font);
-
-    // Draw RIGHT ("selepas")
-    await drawImageBox(pdfDoc, page, after, rightX, yPos, boxSize, font);
+    await drawImageBox(pdfDoc, page, beforeImages[i], leftX, rowY, boxSize, font);
+    await drawImageBox(pdfDoc, page, afterImages[i], rightX, rowY, boxSize, font);
   }
 
   delete completion.__pageData;
 }
+
 
 
 /** Renders 1 image box with caption */
@@ -351,14 +325,15 @@ async function drawImageBox(
   size: number,
   font: any
 ) {
+  const captionHeight = 40;
+
   if (!imgData) {
-    // draw an empty placeholder box
     page.drawRectangle({
       x,
       y: y - size,
       width: size,
       height: size,
-      borderColor: rgb(0.85, 0.85, 0.85),
+      borderColor: rgb(0.8, 0.8, 0.8),
       borderWidth: 1,
     });
     return;
@@ -367,7 +342,6 @@ async function drawImageBox(
   try {
     const bytes = await fetchImage(imgData.url);
     let img;
-
     try { img = await pdfDoc.embedJpg(bytes); }
     catch { img = await pdfDoc.embedPng(bytes); }
 
@@ -375,7 +349,7 @@ async function drawImageBox(
     const xOff = (size - scaled.width) / 2;
     const yOff = (size - scaled.height) / 2;
 
-    // Border box
+    // Image border
     page.drawRectangle({
       x,
       y: y - size,
@@ -393,22 +367,38 @@ async function drawImageBox(
       height: scaled.height,
     });
 
-    // Caption
+    // 🔥 CAPTION BACKGROUND BLOCK
+    page.drawRectangle({
+      x,
+      y: y - size - captionHeight,
+      width: size,
+      height: captionHeight - 5,
+      color: rgb(0.94, 0.94, 0.94),
+      borderColor: rgb(0.85, 0.85, 0.85),
+      borderWidth: 0.8,
+    });
+
+    // Caption text
     if (imgData.caption) {
-      wrapText(imgData.caption, 28).forEach((line, i) => {
+      const lines = wrapText(imgData.caption, 32);
+
+      lines.forEach((line, i) => {
         page.drawText(line, {
-          x,
-          y: y - size - 15 - i * 12,
+          x: x + 5,
+          y: y - size - 18 - i * 10,
           size: 8,
           font,
-          color: rgb(0.3, 0.3, 0.3),
+          color: rgb(0.2, 0.2, 0.2),
         });
       });
     }
+
   } catch (err) {
-    console.error("Image load error:", err);
+    console.error("Image error", err);
   }
 }
+
+
 
 
 /** ---------- MAIN EXPORT ---------- */
@@ -422,7 +412,7 @@ export async function generateCompletionPDF(completion: any): Promise<Uint8Array
   let y = height - 40
 
   // HEADER
-  y = await addHeader(pdfDoc, page, y, font, fontBold)
+  y = await addHeader(pdfDoc, page, y, font, fontBold, completion)
 
   // SECTION: MAKLUMAT PENYELESAIAN
   y = addSectionHeader(page, y, 'MAKLUMAT PENYELESAIAN', fontBold)
@@ -493,8 +483,7 @@ export async function generateCompletionPDF(completion: any): Promise<Uint8Array
   // IMAGES (always start on new pages, only type === "completion")
   await addCompletionImages(pdfDoc, completion, font, fontBold)
 
-  // FOOTER on all pages
-  addFooter(pdfDoc, font, fontBold)
+
 
   return await pdfDoc.save()
 }

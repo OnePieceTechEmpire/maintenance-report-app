@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { uploadComplaintImages, validateImages } from '@/lib/image-upload'
 import { addMetadataOverlay, getCurrentLocation } from '@/lib/image-metadata-overlay'
+import type { DraftImageInfo } from '@/Types'
 import { ImageWithCaption } from '@/Types'
 import { useSearchParams } from 'next/navigation' // Add this import
 
@@ -35,10 +36,15 @@ const [currentDraftId, setCurrentDraftId] = useState<string | null>(null)
 const [imageCaptions, setImageCaptions] = useState<string[]>([])
 // Inside your ComplaintForm component, add:
 const searchParams = useSearchParams()
+
 const debugMode = searchParams.get('debug') === 'true'
 const draftId = searchParams.get('draftId')
 const draftLoadedRef = useRef(false)
 const [showOverlay, setShowOverlay] = useState(false)
+
+const params = useSearchParams()
+const overrideCompanyId = params.get("companyId") || null
+
 
 
 useEffect(() => {
@@ -55,121 +61,90 @@ useEffect(() => {
 const handleSaveDraft = async () => {
   setSavingDraft(true)
   setShowOverlay(true)
-  
-  if (debugMode) alert('🚀 START: Saving draft...')
 
   try {
+    // 1) Get current auth user
     const { data: { user } } = await supabase.auth.getUser()
-    
     if (!user) {
-      alert('Please login first')
+      alert("Please login first")
       return
     }
 
-        if (debugMode) alert(`📸 STEP 1: Uploading ${images.length} images...`)
+    // 2) Get fallback profile company_id (for staff)
+    const { data: userProfile } = await supabase
+      .from("profiles")
+      .select("company_id")
+      .eq("id", user.id)
+      .single()
 
-    // Upload images to storage if we have any
-    let uploadedImagesData: any[] = []
-    if (images.length > 0) {
-      const { uploadDraftImages } = await import('@/lib/draft-image-utils')
-      uploadedImagesData = await uploadDraftImages(user.id, images)
-
-            if (debugMode) alert('✅ STEP 1 DONE: Images uploaded')
-      
-      // Add captions to uploaded images
-      uploadedImagesData = uploadedImagesData.map((img, index) => ({
-        ...img,
-        caption: imageCaptions[index] || ''
-      }))
+    // 3) FINAL company_id value
+    const finalCompanyId = overrideCompanyId || userProfile?.company_id
+    if (!finalCompanyId) {
+      alert("Error: Unable to determine correct company.")
+      return
     }
 
+// 4) Upload images
+let uploadedImages: DraftImageInfo[] = []
 
-        if (debugMode) alert('💾 STEP 2: Saving draft data...')
+if (images.length > 0) {
+  const { uploadDraftImages } = await import('@/lib/draft-image-utils')
+  const uploaded = await uploadDraftImages(user.id, images)
 
+  uploadedImages = uploaded.map((img, idx) => ({
+    ...img,
+    caption: imageCaptions[idx] || ""
+  }))
+}
+
+    // 5) Create draft payload
     const draftData = {
+      user_id: user.id,
+      company_id: finalCompanyId,    // ⭐ FIXED HERE
       form_data: formData,
-      uploaded_images: uploadedImagesData
+      uploaded_images: uploadedImages,
     }
 
-if (isEditingDraft && currentDraftId) {
-
-        if (debugMode) alert('🔄 STEP 3: Updating existing draft...')
-      
-  // Delete old images if they exist
-  const { data: oldDraft, error: fetchError } = await supabase
-    .from('complaint_drafts')
-    .select('uploaded_images')
-    .eq('id', currentDraftId)
-    .single()
-
-  if (fetchError) {
-    console.error('Error fetching old draft:', fetchError)
-  }
-
-  if (oldDraft?.uploaded_images && oldDraft.uploaded_images.length > 0) {
-    try {
-      // Use API route instead of direct import
-      const response = await fetch('/api/drafts/delete-images', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ images: oldDraft.uploaded_images })
-      })
-      
-      if (!response.ok) {
-        console.error('Failed to delete old draft images via API')
-        // Continue anyway - don't block the save
-      }
-    } catch (deleteError) {
-      console.error('Error deleting old draft images:', deleteError)
-      // Continue anyway - don't block the save
-    }
-  }
-
-
-      // Update existing draft
+    // 6) UPDATE EXISTING DRAFT
+    if (isEditingDraft && currentDraftId) {
       const { error } = await supabase
-        .from('complaint_drafts')
+        .from("complaint_drafts")
         .update({
+          company_id: finalCompanyId,
           form_data: draftData.form_data,
           uploaded_images: draftData.uploaded_images,
-          updated_at: new Date().toISOString()
+          updated_at: new Date().toISOString(),
         })
-        .eq('id', currentDraftId)
-        .eq('user_id', user.id)
+        .eq("id", currentDraftId)
+        .eq("user_id", user.id)
 
       if (error) throw error
-      alert('Draf berjaya dikemas kini!')
-            if (debugMode) alert('✅ STEP 3 DONE: Draft updated!')
-    } else {
 
-            if (debugMode) alert('🆕 STEP 3: Creating new draft...')
-      // Create new draft
-      const { data, error } = await supabase
-        .from('complaint_drafts')
-        .insert([
-          {
-            user_id: user.id,
-            form_data: draftData.form_data,
-            uploaded_images: draftData.uploaded_images
-          }
-        ])
-        .select()
-
-      if (error) throw error
-      setCurrentDraftId(data[0].id)
-      setIsEditingDraft(true)
-      alert('Draf berjaya disimpan!')
-            if (debugMode) alert('✅ STEP 3 DONE: Draft created!')
+      alert("Draf berjaya dikemas kini!")
+      return
     }
-    
-  } catch (error) {
-    console.error('Error saving draft:', error)
-    alert('Gagal menyimpan draf')
+
+    // 7) CREATE NEW DRAFT
+    const { data, error } = await supabase
+      .from("complaint_drafts")
+      .insert([draftData])
+      .select()
+
+    if (error) throw error
+
+    setCurrentDraftId(data[0].id)
+    setIsEditingDraft(true)
+    alert("Draf berjaya disimpan!")
+
+  } catch (err) {
+    console.error("Error saving draft:", err)
+    alert("Gagal menyimpan draf")
   } finally {
     setSavingDraft(false)
     setShowOverlay(false)
   }
 }
+
 
 // Update loadDraft function
 const loadDraft = async (draftId: string) => {
@@ -202,30 +177,49 @@ const loadDraft = async (draftId: string) => {
     // Load form data
     setFormData(draft.form_data)
     
-    // Load images from storage
-    if (draft.uploaded_images && draft.uploaded_images.length > 0) {
-      const { downloadDraftImages } = await import('@/lib/draft-image-utils')
-      
-      try {
-        const downloadedFiles = await downloadDraftImages(draft.uploaded_images)
-        
-        // Set the actual File objects
-        setImages(downloadedFiles)
-        
-        // Set previews and captions
-        setImagePreviews(draft.uploaded_images.map((img: any) => img.preview))
-        setImageCaptions(draft.uploaded_images.map((img: any) => img.caption || ''))
-        
-      } catch (error) {
-        console.error('Error loading draft images:', error)
-        alert('Some images could not be loaded from draft')
-      }
-    } else {
-      // No images in draft
-      setImages([])
-      setImagePreviews([])
-      setImageCaptions([])
-    }
+// Load images from storage
+if (draft.uploaded_images && draft.uploaded_images.length > 0) {
+  const { downloadDraftImages } = await import('@/lib/draft-image-utils')
+
+  try {
+    // 1) Download blobs from storage
+    const downloadedBlobs = await downloadDraftImages(draft.uploaded_images)
+
+    // 2) Convert each Blob → File
+    const reconstructedFiles = downloadedBlobs.map((blob: Blob, idx: number) => {
+      const original = draft.uploaded_images[idx]
+
+      // Use stored original name OR fallback
+      const filename =
+        original?.original_name ||
+        original?.file_name ||
+        `draft_image_${idx}.${(blob.type.split('/')[1] || 'jpg')}`
+
+      return new File([blob], filename, { type: blob.type })
+    })
+
+    // 3) Set reconstructed File objects
+    setImages(reconstructedFiles)
+
+    // 4) Restore previews + captions
+    setImagePreviews(
+      draft.uploaded_images.map((img: any) => img.preview)
+    )
+
+    setImageCaptions(
+      draft.uploaded_images.map((img: any) => img.caption || '')
+    )
+
+  } catch (error) {
+    console.error('Error loading draft images:', error)
+    alert('Some images could not be loaded from draft')
+  }
+} else {
+  setImages([])
+  setImagePreviews([])
+  setImageCaptions([])
+}
+
 
     setCurrentDraftId(draft.id)
     setIsEditingDraft(true)
@@ -331,7 +325,11 @@ const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
 
   // No metadata, no location fetching, no validation limits
   for (const file of files) {
-    try {
+        try {
+      const fixedFile = new File([file], file.name || "image.jpg", {
+        type: file.type || "image/jpeg",
+        lastModified: Date.now()
+      });
       // Add file directly (no overlay)
       setImages(prev => [...prev, file])
 
@@ -343,7 +341,7 @@ const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
           setImageCaptions(prev => [...prev, ""]) // default empty caption
         }
       }
-      reader.readAsDataURL(file)
+      reader.readAsDataURL(fixedFile)
 
     } catch (error) {
       console.error("❌ Failed to process image:", error)
@@ -385,42 +383,68 @@ const handleSubmit = async (e: React.FormEvent) => {
       return
     }
 
-    // Get user's company_id
+    // Get ?companyId from URL (PM only)
+    const searchParams = new URLSearchParams(window.location.search)
+    const companyIdFromUrl = searchParams.get('companyId')
+
+    // Get user's profile (staff will have company_id)
     const { data: profile } = await supabase
       .from('profiles')
-      .select('company_id')
+      .select('company_id, role')
       .eq('id', user.id)
       .single()
 
-          // SIMPLE NULL CHECK - no new variables
-    if (!profile?.company_id) {
-      alert('Error: Unable to determine your company. Please contact admin.')
+    // Decide the company for this complaint
+    const targetCompanyId = companyIdFromUrl || profile?.company_id
+
+    if (!targetCompanyId) {
+      alert('Error: No company selected.')
       return
     }
 
-    // Submit complaint WITH company_id
+    // Submit complaint
     const { data, error } = await supabase
       .from('complaints')
       .insert([
         {
           ...formData,
           submitted_by: user.id,
-          company_id: profile.company_id, // ⬅️ ADD THIS
+          company_id: targetCompanyId, // ✅ IMPORTANT
           status: 'pending'
         }
       ])
       .select()
 
-      if (error) throw error
+    if (error) throw error
 
-      const complaintId = data[0].id
+    const complaintId = data[0].id
       console.log('Complaint submitted with ID:', complaintId)
+
+const fixedImages = images.map((file) => {
+  if (!file.type || file.type === "") {
+    return new File([file], file.name, {
+      type: "image/jpeg",
+      lastModified: Date.now()
+    });
+  }
+  return file;
+});
+
+
+console.log("🧪 IMAGES BEFORE UPLOAD:", images)
+console.log("🧪 IMAGE PREVIEWS:", imagePreviews)
+console.log("🧪 IMAGE CAPTIONS:", imageCaptions)
 
     // Upload images if any
 let imageUrls: ImageWithCaption[] = []
 if (images.length > 0) {
   setUploadProgress(30)
-  imageUrls = await uploadComplaintImages(data[0].id, images, imageCaptions) // Pass captions
+  imageUrls = await uploadComplaintImages(
+  data[0].id,
+  fixedImages,
+  imageCaptions
+)
+
   setUploadProgress(70)
   
   // Update complaint with image URLs and captions
@@ -500,7 +524,12 @@ if (draft?.uploaded_images && draft.uploaded_images.length > 0) {
 }
 
     alert(`Complaint submitted successfully! ${images.length > 0 ? `${images.length} images uploaded.` : ''}`)
-    router.push('/dashboard')
+        // 🔁 Correct redirect
+    if (companyIdFromUrl) {
+      router.push(`/pm/${targetCompanyId}/dashboard`)
+    } else {
+      router.push('/dashboard')
+    }
     
   } catch (error) {
     console.error('Error submitting complaint:', error)
@@ -660,7 +689,7 @@ if (draft?.uploaded_images && draft.uploaded_images.length > 0) {
           {/* NEW: Image Upload Section */}
           <div>
             <label className="block text-gray-700 text-sm font-bold mb-2">
-              Gambar Kejadian (Maksimum 5)
+              Gambar Kejadian 
             </label>
             <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center">
               <input
@@ -802,13 +831,25 @@ if (draft?.uploaded_images && draft.uploaded_images.length > 0) {
     </button>
   )}
   
-  <button
-    type="button"
-    onClick={() => router.push('/dashboard')}
-    className="bg-gray-500 text-white px-6 py-2 rounded hover:bg-gray-600"
-  >
-    Back
-  </button>
+<button
+  type="button"
+  onClick={() => {
+    const searchParams = new URLSearchParams(window.location.search)
+    const companyIdFromUrl = searchParams.get('companyId')
+
+    if (companyIdFromUrl) {
+      // PM → go back to the selected company dashboard
+      router.push(`/pm/${companyIdFromUrl}/dashboard`)
+    } else {
+      // Staff → normal dashboard
+      router.push('/dashboard')
+    }
+  }}
+  className="bg-gray-500 text-white px-6 py-2 rounded hover:bg-gray-600"
+>
+  Back
+</button>
+
 </div>
         </form>
       </div>

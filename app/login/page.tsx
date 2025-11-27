@@ -43,9 +43,15 @@ export default function Login() {
       // Redirect super admin with no company to admin panel
       if (profile?.role === 'super_admin' && !profile?.company_id) {
         router.push('/admin')
-      } else {
-        router.push('/dashboard')
-      }
+      } else if (profile?.role === 'project_manager') {
+  router.push('/pm')
+} 
+else if (profile?.role === 'super_admin') {
+  router.push('/admin')
+} 
+else {
+  router.push('/dashboard')
+}
     }
     } catch (error: any) {
       console.error('Auth error:', error)

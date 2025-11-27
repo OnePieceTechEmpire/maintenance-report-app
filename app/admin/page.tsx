@@ -43,76 +43,90 @@ const fetchPendingInvites = async () => {
 }
   
 // Add this invitation function
+// Add this invitation function
 const sendInvitation = async () => {
-  if (!inviteEmail || !inviteCompany) {
-    alert('Please fill in email and company')
+  if (!inviteEmail) {
+    alert('Please fill in the email')
     return
   }
 
   setInviting(true)
+
   try {
-    const token = Math.random().toString(36).substring(2) + Date.now().toString(36)
-    
+    // 🔥 Always assign CRE Holding for PMs
+    const HQ_COMPANY_ID = "026d423e-d4ab-4079-84d4-886f3e90e6b1"
+
+    const selectedCompany =
+      inviteRole === "project_manager"
+        ? HQ_COMPANY_ID
+        : inviteCompany
+
+    if (!selectedCompany) {
+      alert("Please select a company for staff.")
+      setInviting(false)
+      return
+    }
+
+    const token =
+      Math.random().toString(36).substring(2) +
+      Date.now().toString(36)
+
+    // Insert into DB
     const { error } = await supabase
       .from('user_invites')
       .insert([{
-        email: inviteEmail,
-        company_id: inviteCompany,
+        email: inviteEmail.trim(),
+        company_id: selectedCompany,
         role: inviteRole,
         invited_by: user.id,
-        token: token,
-        expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
+        token,
+        expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days
+        used: false
       }])
 
     if (error) throw error
 
     const invitationLink = `${window.location.origin}/invite/${token}`
-    
-    // ✅ FIXED: Better clipboard handling for mobile
+
+    // Try to copy to clipboard
     try {
       await navigator.clipboard.writeText(invitationLink)
-      
-      // Show success message with copy option
-      alert(`✅ Invitation created for ${inviteEmail}!\n\nLink copied to clipboard.`)
-      
+      alert(`✅ Invitation created for ${inviteEmail}!\nLink copied to clipboard.`)
     } catch (clipboardError) {
-      console.warn('Clipboard failed, showing link for manual copy:', clipboardError)
-      
-      // Mobile fallback - show the link and instructions
-      const shouldCopy = confirm(
-        `✅ Invitation created for ${inviteEmail}!\n\n` +
-        `Invitation Link:\n${invitationLink}\n\n` +
-        `Please copy this link manually and send it to the user.`
+      console.warn("Clipboard failed:", clipboardError)
+
+      const fallback = confirm(
+        `Invitation created!\n\n${invitationLink}\n\nCopy manually?`
       )
-      
-      // Optional: Try to select the text for easier copying on mobile
-      if (shouldCopy) {
-        // Create a temporary input to help with copying on mobile
-        const tempInput = document.createElement('input')
-        tempInput.value = invitationLink
-        document.body.appendChild(tempInput)
-        tempInput.select()
-        tempInput.setSelectionRange(0, 99999) // For mobile devices
-        document.execCommand('copy')
-        document.body.removeChild(tempInput)
-        
-        alert('Link selected! Please paste it to share with the user.')
+
+      if (fallback) {
+        const temp = document.createElement("input")
+        temp.value = invitationLink
+        document.body.appendChild(temp)
+        temp.select()
+        document.execCommand("copy")
+        document.body.removeChild(temp)
+        alert("Copied!")
       }
     }
-        // ⬇️⬇️ ADD THIS - Refresh the pending invites list ⬇️⬇️
+
+    // Refresh list
     fetchPendingInvites()
-    
-    setInviteEmail('')
-    setInviteCompany('')
-    setInviteRole('staff')
-    
-  } catch (error) {
-    console.error('Error sending invitation:', error)
-    alert('Failed to send invitation')
-  } finally {
-    setInviting(false)
+
+    // Reset form
+    setInviteEmail("")
+    setInviteCompany("")
+    setInviteRole("staff")
+
+  } catch (err) {
+    console.error("Error sending invitation:", err)
+    alert("Failed to send invitation. Check console.")
   }
+
+  setInviting(false)
 }
+
+
 
 const resendInvitation = async (invite: any) => {
   try {
@@ -512,11 +526,18 @@ const fetchCompanyStats = async () => {
         <label className="block text-sm font-medium text-gray-700 mb-1">
           Company
         </label>
-        <select
-          value={inviteCompany}
-          onChange={(e) => setInviteCompany(e.target.value)}
-          className="w-full border rounded px-3 py-2 text-sm"
-        >
+<select
+  value={inviteCompany}
+  onChange={(e) => setInviteCompany(e.target.value)}
+  disabled={inviteRole === 'project_manager'}
+  className={`w-full border rounded px-3 py-2 text-sm ${
+    inviteRole === 'project_manager' ? 'bg-gray-100 cursor-not-allowed' : ''
+  }`}
+>
+<option value="">
+  {inviteRole === 'project_manager' ? 'N/A for PM role' : 'Select Company'}
+</option>
+
           <option value="">Select Company</option>
           {companies.map((company) => (
             <option key={company.id} value={company.id}>
@@ -534,7 +555,10 @@ const fetchCompanyStats = async () => {
           onChange={(e) => setInviteRole(e.target.value)}
           className="w-full border rounded px-3 py-2 text-sm"
         >
-          <option value="staff">Staff</option>        </select>
+          <option value="staff">Staff</option>
+          <option value="project_manager">Project Manager</option>
+                  </select>
+          
       </div>
       <div className="flex items-end">
         <button

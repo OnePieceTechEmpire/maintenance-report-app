@@ -146,3 +146,13 @@ export interface UserProfile {
   updated_at: string
   companies?: Company
 }
+
+// Completion Draft stored in Supabase
+export interface CompletionDraft {
+  id: string
+  complaint_id: string
+  user_id: string
+  uploaded_images: DraftImageInfo[]
+  created_at: string
+  updated_at: string
+}

@@ -5,53 +5,73 @@ import { compressImage, shouldCompressImage } from './image-compression'
 import { ImageWithCaption } from '@/Types'
 
 
-export async function uploadComplaintImages(complaintId: string, images: File[], captions: string[] = []): Promise<ImageWithCaption[]> {
-  const imageData: ImageWithCaption[] = []
-  
+export async function uploadComplaintImages(
+  complaintId: string,
+  images: File[],
+  captions: string[] = []
+): Promise<ImageWithCaption[]> {
+  const results: ImageWithCaption[] = []
+
   for (let i = 0; i < images.length; i++) {
+    const file = images[i]
+    const caption = captions[i] || ""
+
+    console.log("🚀 Starting upload for:", file.name, "type:", file.type)
+
     try {
-      const image = images[i]
-      const caption = captions[i] || ''
-      
-      let imageToUpload = image
-      
-      // Compress image if it's large
-      if (shouldCompressImage(image)) {
-        console.log('🔄 Compressing image:', image.name)
-        imageToUpload = await compressImage(image)
+      let fileToUpload = file
+
+      if (file.size > 500_000) {
+        console.log("🗜 Compressing:", file.name)
+        fileToUpload = await compressImage(file)
       }
 
-      // Create unique filename
-      const fileExt = 'jpg'
-      const fileName = `${complaintId}/${Date.now()}-${Math.random().toString(36).substring(2)}.${fileExt}`
-      
-      // Upload image
-      const { data, error } = await supabase.storage
-        .from('complaint-images')
-        .upload(fileName, imageToUpload)
-      
-      if (error) {
-        console.error('Image upload error:', error)
-        throw new Error(`Failed to upload image: ${error.message}`)
+      const mime = fileToUpload.type || "image/jpeg"
+      const ext = mime.split("/")[1] || "jpg"
+
+      const filePath = `${complaintId}/${Date.now()}-${Math.random()
+        .toString(36)
+        .substring(2)}.${ext}`
+
+      console.log("📡 Uploading to path:", filePath)
+
+      const { data, error: uploadErr } = await supabase.storage
+        .from("complaint-images")
+        .upload(filePath, fileToUpload, {
+          contentType: mime,
+          upsert: false
+        })
+
+      if (uploadErr) {
+        console.error("❌ SUPABASE UPLOAD ERROR:", uploadErr)
+        throw uploadErr     // <——🔥🔥🔥 important!!!
       }
-      
-      // Get public URL
-      const { data: { publicUrl } } = supabase.storage
-        .from('complaint-images')
-        .getPublicUrl(fileName)
-      
-      imageData.push({
-        url: publicUrl,
-        caption: caption
+
+      console.log("✅ Uploaded:", data)
+
+      const { data: urlData } = supabase.storage
+        .from("complaint-images")
+        .getPublicUrl(filePath)
+
+      console.log("🌍 Public URL:", urlData.publicUrl)
+
+      results.push({
+        url: urlData.publicUrl,
+        caption,
+        storage_path: filePath
       })
-      
-    } catch (error) {
-      console.error('Error processing image:', images[i].name, error)
+
+    } catch (err) {
+      console.error("💥 CRITICAL UPLOAD FAILURE:", err)
+      throw err    // <——🔥 DO NOT SILENT FAIL
     }
   }
-  
-  return imageData
+
+  console.log("📦 Final uploaded image list:", results)
+  return results
 }
+
+
 
 
 

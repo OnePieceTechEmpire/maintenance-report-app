@@ -46,6 +46,8 @@ const [currentDraftId, setCurrentDraftId] = useState<string | null>(null)
   const searchParams = useSearchParams()
   const complaintId = searchParams.get('complaintId')
   const draftId = searchParams.get('draftId') // Add this line
+  const companyIdFromUrl = searchParams.get('companyId')
+
     const [uploadProgress, setUploadProgress] = useState(0)
   const [receiptImages, setReceiptImages] = useState<File[]>([])
 const [receiptImagePreviews, setReceiptImagePreviews] = useState<string[]>([])
@@ -522,11 +524,15 @@ if (Array.isArray(draft?.uploaded_images) && draft.uploaded_images.length > 0) {
       .eq('id', user.id)
       .single()
 
+      
+
     // Simple null check
     if (!profile?.company_id) {
       alert('Error: Unable to determine your company. Please contact admin.')
       return
     }
+
+
 
       // Create completion record
       const { data: completion, error } = await supabase
@@ -540,6 +546,7 @@ if (Array.isArray(draft?.uploaded_images) && draft.uploaded_images.length > 0) {
             work_location: formData.work_location,
             completion_date: formData.completion_date,
             company_name: formData.company_name,
+
             work_order_number: formData.work_order_number,
             officer_name: formData.officer_name,
             supervisor_name: formData.supervisor_name,
@@ -668,7 +675,13 @@ if (isEditingDraft && currentDraftId) {
 // ⬆️⬆️ END CLEANUP CODE ⬆️⬆️
 
       alert('Work completion recorded successfully!')
-      router.push('/dashboard')
+      const companyIdFromUrl = searchParams.get("companyId")
+
+if (companyIdFromUrl) {
+  router.push(`/pm/${companyIdFromUrl}/dashboard`)
+} else {
+  router.push('/dashboard')
+}
       
     } catch (error) {
       console.error('Error submitting completion:', error)
@@ -722,8 +735,23 @@ if (isEditingDraft && currentDraftId) {
 
         
         <form onSubmit={handleSubmit} className="space-y-6">
+                      <div>
+              
+              <label className="block text-gray-700 text-sm font-bold mb-2">
+                Company Name
+              </label>
+<input
+   type="text"
+   name="company_name"
+   value={formData.company_name}
+   onChange={handleChange}
+
+                className="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div>
+              
               <label className="block text-gray-700 text-sm font-bold mb-2">
                 1. Tajuk kerja *
               </label>
@@ -744,7 +772,6 @@ if (isEditingDraft && currentDraftId) {
               <input
                 type="text"
                 name="work_location"
-                value={formData.work_location}
                 onChange={handleChange}
                 className="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
                 required
@@ -1059,21 +1086,7 @@ if (isEditingDraft && currentDraftId) {
 </div>
           </div>
 
-   {/*          <div>
-            <label className="block text-gray-700 text-sm font-bold mb-2">
-              12. Tandatangan PIC
-            </label>
-            <input
-              type="text"
-              value={signature}
-              onChange={handleSignature}
-              className="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
-              placeholder="Nama penuh untuk tandatangan"
-            />
-            <p className="text-xs text-gray-500 mt-1">
-              * Masukkan nama penuh sebagai tandatangan digital
-            </p>
-          </div>*/}
+
 
 <div className="flex gap-4 pt-4 flex-wrap">
   <button
@@ -1105,13 +1118,24 @@ if (isEditingDraft && currentDraftId) {
     </button>
   )}
   
-  <button
-    type="button"
-    onClick={() => router.push('/dashboard')}
-    className="bg-gray-500 text-white px-6 py-2 rounded hover:bg-gray-600"
-  >
-    Back
-  </button>
+<button
+  type="button"
+  onClick={() => {
+    const searchParams = new URLSearchParams(window.location.search)
+    const companyIdFromUrl = searchParams.get('companyId')
+
+    if (companyIdFromUrl) {
+      // PM → go back to the selected company dashboard
+      router.push(`/pm/${companyIdFromUrl}/dashboard`)
+    } else {
+      // Staff → normal dashboard
+      router.push('/dashboard')
+    }
+  }}
+  className="bg-gray-500 text-white px-6 py-2 rounded hover:bg-gray-600"
+>
+  Back
+</button>
 </div>
         </form>
       </div>
