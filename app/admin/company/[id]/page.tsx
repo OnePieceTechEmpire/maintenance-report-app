@@ -244,7 +244,18 @@ useEffect(() => {
     index > complaints.length - 3 ? "bottom-full mb-2" : "mt-2"
   }`}
 >
-        
+        {/* View Details (Admin Read-only) */}
+<button
+  onClick={() => {
+    window.open(`/admin/complaints/${c.id}`, '_blank')
+    setOpenDropdown(null)
+  }}
+  className="block w-full text-left px-4 py-2 text-sm text-blue-600 hover:bg-blue-50 font-medium"
+>
+  👁 Lihat Butiran
+</button>
+
+
 
         {/* View Complaint PDF */}
         <button
@@ -281,6 +292,7 @@ useEffect(() => {
           >
             Lihat Resit
           </button>
+
         )}
       </div>
     )}
