@@ -95,12 +95,27 @@ useEffect(() => {
     window.open(url, '_blank');
   };
 
-  const viewCompletionPDF = async (completionId: string) => {
-    if (!completionId) return alert('Completion record missing.');
-    const { data } = await supabase.from('completions').select('pdf_url').eq('id', completionId).single();
-    if (data?.pdf_url) window.open(data.pdf_url, '_blank');
-    else alert('Completion PDF not available.');
-  };
+const viewCompletionPDF = async (completionId: string) => {
+  try {
+    const res = await fetch('/api/completion-pdf/generate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ completionId }),
+    })
+
+    const result = await res.json()
+
+    if (!res.ok || !result.pdfUrl) {
+      throw new Error(result.error || 'PDF generation failed')
+    }
+
+    // ✅ SAME behavior as Lihat PDF Aduan
+    viewPDF(result.pdfUrl)
+  } catch (err) {
+    console.error(err)
+    alert('Completion PDF not available')
+  }
+}
 
   const viewReceipts = async (completionId: string) => {
     if (!completionId) return alert('Completion missing.');
