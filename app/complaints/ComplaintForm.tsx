@@ -8,7 +8,8 @@ import { uploadComplaintImages, validateImages } from '@/lib/image-upload'
 import { addMetadataOverlay, getCurrentLocation } from '@/lib/image-metadata-overlay'
 import type { DraftImageInfo } from '@/Types'
 import { ImageWithCaption } from '@/Types'
-import { useSearchParams } from 'next/navigation' // Add this import
+import { useSearchParams, useParams } from 'next/navigation'
+
 
 
 export default function ComplaintForm() {
@@ -42,9 +43,15 @@ const draftId = searchParams.get('draftId')
 const draftLoadedRef = useRef(false)
 const [showOverlay, setShowOverlay] = useState(false)
 
-const params = useSearchParams()
-const overrideCompanyId = params.get("companyId") || null
+const params = useParams() as { complaintId?: string }
 
+const complaintIdFromURL =
+  searchParams.get('complaintId') || params.complaintId || null
+
+const isEditMode = Boolean(complaintIdFromURL)
+
+const [isEditingComplaint, setIsEditingComplaint] = useState(false)
+const [overrideCompanyId, setOverrideCompanyId] = useState<string | null>(null)
 
 
 useEffect(() => {
@@ -55,6 +62,69 @@ useEffect(() => {
   }
 }, [draftId])
 
+useEffect(() => {
+  if (complaintIdFromURL && !draftLoadedRef.current) {
+    draftLoadedRef.current = true
+    loadComplaintForEdit(complaintIdFromURL)
+  }
+}, [complaintIdFromURL])
+
+
+
+const loadComplaintForEdit = async (complaintId: string) => {
+  setShowOverlay(true)
+
+  try {
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return alert('Please login')
+
+    const { data: complaint, error } = await supabase
+      .from('complaints')
+      .select('*')
+      .eq('id', complaintId)
+      .eq('submitted_by', user.id) // 🔒 PM can only edit own
+      .single()
+
+    if (error || !complaint) {
+      alert('Complaint not found or not yours')
+      return
+    }
+
+    // 1️⃣ Load form fields
+    setFormData({
+      building_name: complaint.building_name,
+      incident_location: complaint.incident_location,
+      incident_description: complaint.incident_description,
+      incident_date: complaint.incident_date,
+      reporter_name: complaint.reporter_name,
+      reporter_phone: complaint.reporter_phone,
+      solution_suggestion: complaint.solution_suggestion,
+    })
+
+    // 2️⃣ Load images (same pattern as draft)
+    if (complaint.image_urls?.length > 0) {
+      const files = await Promise.all(
+        complaint.image_urls.map(async (img: any, idx: number) => {
+          const res = await fetch(img.url)
+          const blob = await res.blob()
+          return new File([blob], `complaint_${idx}.jpg`, { type: blob.type })
+        })
+      )
+
+      setImages(files)
+      setImagePreviews(complaint.image_urls.map((i: any) => i.url))
+      setImageCaptions(complaint.image_urls.map((i: any) => i.caption || ''))
+    }
+
+    setIsEditingComplaint(true)
+
+  } catch (err) {
+    console.error(err)
+    alert('Failed to load complaint')
+  } finally {
+    setShowOverlay(false)
+  }
+}
 
 
 // Update handleSaveDraft function
@@ -78,11 +148,16 @@ const handleSaveDraft = async () => {
       .single()
 
     // 3) FINAL company_id value
-    const finalCompanyId = overrideCompanyId || userProfile?.company_id
-    if (!finalCompanyId) {
-      alert("Error: Unable to determine correct company.")
-      return
-    }
+// 3) FINAL company_id value (PM = from URL, Staff = from profile)
+const sp = new URLSearchParams(window.location.search)
+const companyIdFromUrl = sp.get("companyId")
+
+const finalCompanyId = companyIdFromUrl || userProfile?.company_id
+if (!finalCompanyId) {
+  alert("Error: Unable to determine correct company.")
+  return
+}
+
 
 // 4) Upload images
 let uploadedImages: DraftImageInfo[] = []
@@ -100,7 +175,7 @@ if (images.length > 0) {
     // 5) Create draft payload
     const draftData = {
       user_id: user.id,
-      company_id: finalCompanyId,    // ⭐ FIXED HERE
+      company_id: finalCompanyId,   
       form_data: formData,
       uploaded_images: uploadedImages,
     }
@@ -373,52 +448,63 @@ const handleSubmit = async (e: React.FormEvent) => {
   e.preventDefault()
   setLoading(true)
   setShowOverlay(true)
-  
 
   try {
     const { data: { user } } = await supabase.auth.getUser()
-    if (!user) {
-      alert('Please login first')
-      router.push('/login')
-      return
-    }
+    if (!user) throw new Error('Not logged in')
 
-    // Get ?companyId from URL (PM only)
     const searchParams = new URLSearchParams(window.location.search)
     const companyIdFromUrl = searchParams.get('companyId')
 
-    // Get user's profile (staff will have company_id)
     const { data: profile } = await supabase
       .from('profiles')
-      .select('company_id, role')
+      .select('company_id')
       .eq('id', user.id)
       .single()
 
-    // Decide the company for this complaint
     const targetCompanyId = companyIdFromUrl || profile?.company_id
+    if (!targetCompanyId) throw new Error('No company')
 
-    if (!targetCompanyId) {
-      alert('Error: No company selected.')
-      return
+    let finalComplaintId = complaintIdFromURL
+
+    // ✏️ EDIT MODE
+    if (isEditMode && complaintIdFromURL) {
+      const { error } = await supabase
+        .from('complaints')
+        .update({
+          ...formData,
+          status: 'pending',
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', complaintIdFromURL)
+        .eq('submitted_by', user.id)
+
+      if (error) throw error
+
+      console.log('✏️ Complaint updated:', complaintIdFromURL)
     }
 
-    // Submit complaint
-    const { data, error } = await supabase
-      .from('complaints')
-      .insert([
-        {
+    // 🆕 CREATE MODE
+    if (!isEditMode) {
+      const { data, error } = await supabase
+        .from('complaints')
+        .insert([{
           ...formData,
           submitted_by: user.id,
-          company_id: targetCompanyId, // ✅ IMPORTANT
+          company_id: targetCompanyId,
           status: 'pending'
-        }
-      ])
-      .select()
+        }])
+        .select()
+        .single()
 
-    if (error) throw error
+      if (error) throw error
 
-    const complaintId = data[0].id
-      console.log('Complaint submitted with ID:', complaintId)
+      finalComplaintId = data.id
+      console.log('🆕 Complaint created:', finalComplaintId)
+    }
+
+    if (!finalComplaintId) throw new Error('Complaint ID missing')
+
 
 const fixedImages = images.map((file) => {
   if (!file.type || file.type === "") {
@@ -440,7 +526,7 @@ let imageUrls: ImageWithCaption[] = []
 if (images.length > 0) {
   setUploadProgress(30)
   imageUrls = await uploadComplaintImages(
-  data[0].id,
+  finalComplaintId!,   // ✅ FIXED
   fixedImages,
   imageCaptions
 )
@@ -451,7 +537,7 @@ if (images.length > 0) {
   const { error: updateError } = await supabase
     .from('complaints')
     .update({ image_urls: imageUrls })
-    .eq('id', data[0].id)
+    .eq('id', finalComplaintId)
 
   if (updateError) {
     console.error('Failed to update complaint with images:', updateError)
@@ -461,7 +547,7 @@ if (images.length > 0) {
       setUploadProgress(90)
       
       // Generate PDF (we'll update this later to include images)
-      await generatePDF(data[0].id)
+      await generatePDF(finalComplaintId!)
       
       setUploadProgress(100)
 

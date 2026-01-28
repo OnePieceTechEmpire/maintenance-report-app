@@ -47,11 +47,16 @@ const [currentDraftId, setCurrentDraftId] = useState<string | null>(null)
   const complaintId = searchParams.get('complaintId')
   const draftId = searchParams.get('draftId') // Add this line
   const companyIdFromUrl = searchParams.get('companyId')
+  const completionIdFromUrl = searchParams.get('completionId')
+const isEditMode = Boolean(completionIdFromUrl)
+
 
     const [uploadProgress, setUploadProgress] = useState(0)
   const [receiptImages, setReceiptImages] = useState<File[]>([])
 const [receiptImagePreviews, setReceiptImagePreviews] = useState<string[]>([])
 const [showOverlay, setShowOverlay] = useState(false)
+const [resolvedComplaintId, setResolvedComplaintId] = useState<string | null>(null)
+
 
 
   useEffect(() => {
@@ -71,6 +76,98 @@ useEffect(() => {
     return () => clearTimeout(timer)
   }
 }, [draftId, complaintId])
+
+useEffect(() => {
+  if (isEditMode && completionIdFromUrl) {
+    loadCompletionForEdit(completionIdFromUrl)
+  }
+}, [isEditMode, completionIdFromUrl])
+
+
+const loadCompletionForEdit = async (completionId: string) => {
+  
+  setShowOverlay(true)
+
+  try {
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return alert('Please login first')
+
+    const { data: comp, error } = await supabase
+      .from('completions')
+      .select('*')
+      .eq('id', completionId)
+      .eq('completed_by', user.id) // 🔒 PM can only edit own completion
+      .single()
+
+    if (error || !comp) {
+      alert('Completion not found or not yours')
+      return
+    }
+    setResolvedComplaintId(comp.complaint_id)
+
+
+    // Fill form fields
+    setFormData({
+      work_title: comp.work_title || '',
+      work_location: comp.work_location || '',
+      completion_date: comp.completion_date || '',
+      company_name: comp.company_name || '',
+      work_order_number: comp.work_order_number || '',
+      officer_name: comp.officer_name || '',
+      supervisor_name: comp.supervisor_name || '',
+      work_scope: comp.work_scope || '',
+      quantity: comp.quantity || '',
+      materials_equipment: comp.materials_equipment || '',
+      worker_count: comp.worker_count?.toString?.() || '',
+    })
+
+    setSignature(comp.pic_signature_url || '')
+
+    // Load images from completion_images
+    let imgs = comp.completion_images || []
+    if (typeof imgs === 'string') imgs = JSON.parse(imgs)
+
+    const before = imgs.filter((i: any) => i.type === 'before')
+    const after = imgs.filter((i: any) => i.type === 'after')
+    const receipts = imgs.filter((i: any) => i.type === 'receipt')
+
+    const toFiles = async (arr: any[], prefix: string) => {
+      return Promise.all(
+        arr.map(async (img: any, idx: number) => {
+          const res = await fetch(img.url)
+          const blob = await res.blob()
+          return new File([blob], `${prefix}_${idx}.jpg`, { type: blob.type })
+        })
+      )
+    }
+
+    // BEFORE
+    if (before.length) {
+      setBeforeImages(await toFiles(before, 'before'))
+      setBeforeImagePreviews(before.map((i: any) => i.url))
+      setBeforeImageCaptions(before.map((i: any) => i.caption || ''))
+    }
+
+    // AFTER
+    if (after.length) {
+      setCompletionImages(await toFiles(after, 'after'))
+      setCompletionImagePreviews(after.map((i: any) => i.url))
+      setCompletionImageCaptions(after.map((i: any) => i.caption || ''))
+    }
+
+    // RECEIPTS
+    if (receipts.length) {
+      setReceiptImages(await toFiles(receipts, 'receipt'))
+      setReceiptImagePreviews(receipts.map((i: any) => i.url))
+    }
+
+  } catch (err) {
+    console.error(err)
+    alert('Failed to load completion')
+  } finally {
+    setShowOverlay(false)
+  }
+}
 
 
 
@@ -167,7 +264,7 @@ const removeReceipt = (index: number) => {
       // Pre-fill some fields from complaint
       setFormData(prev => ({
         ...prev,
-        work_location: data.incident_location,
+
         work_title: `Penyelenggaraan - ${data.building_name}`,
           supervisor_name: data.profiles?.full_name || "",
         completion_date: new Date().toISOString().split('T')[0]
@@ -502,7 +599,9 @@ if (Array.isArray(draft?.uploaded_images) && draft.uploaded_images.length > 0) {
     setLoading(true)
     setShowOverlay(true)
 
+
     try {
+      
       // Get current user
       const { data: { user } } = await supabase.auth.getUser()
       
@@ -512,10 +611,12 @@ if (Array.isArray(draft?.uploaded_images) && draft.uploaded_images.length > 0) {
         return
       }
 
-      if (!complaintId) {
-        alert('No complaint selected')
-        return
-      }
+        const finalComplaintId = complaintId || resolvedComplaintId
+
+if (!finalComplaintId) {
+  alert('No complaint selected')
+  return
+}
 
           // Get user's company_id
     const { data: profile } = await supabase
@@ -534,38 +635,66 @@ if (Array.isArray(draft?.uploaded_images) && draft.uploaded_images.length > 0) {
 
 
 
+
       // Create completion record
-      const { data: completion, error } = await supabase
-        .from('completions')
-        .insert([
-          {
-            complaint_id: complaintId,
-            completed_by: user.id,
-            company_id: profile.company_id, // ⬅️ ADD THIS LINE
-            work_title: formData.work_title,
-            work_location: formData.work_location,
-            completion_date: formData.completion_date,
-            company_name: formData.company_name,
+let finalCompletionId = completionIdFromUrl
 
-            work_order_number: formData.work_order_number,
-            officer_name: formData.officer_name,
-            supervisor_name: formData.supervisor_name,
-            work_scope: formData.work_scope,
-            quantity: formData.quantity,
-            materials_equipment: formData.materials_equipment,
-            worker_count: formData.worker_count ? parseInt(formData.worker_count) : null,
-            pic_signature_url: signature || null,
-          }
-        ])
-        .select()
+if (isEditMode && completionIdFromUrl) {
+  const { error } = await supabase
+    .from('completions')
+    .update({
+      work_title: formData.work_title,
+      work_location: formData.work_location,
+      completion_date: formData.completion_date,
+      company_name: formData.company_name,
+      work_order_number: formData.work_order_number,
+      officer_name: formData.officer_name,
+      supervisor_name: formData.supervisor_name,
+      work_scope: formData.work_scope,
+      quantity: formData.quantity,
+      materials_equipment: formData.materials_equipment,
+      worker_count: formData.worker_count ? parseInt(formData.worker_count) : null,
+      pic_signature_url: signature || null,
 
-      if (error) throw error
+    })
+    .eq('id', completionIdFromUrl)
+    .eq('completed_by', user.id)
+
+  if (error) throw error
+} else {
+  // create mode (your existing insert)
+  const { data: completion, error } = await supabase
+    .from('completions')
+    .insert([{
+      complaint_id: finalComplaintId,
+      completed_by: user.id,
+      company_id: profile.company_id,
+      work_title: formData.work_title,
+      work_location: formData.work_location,
+      completion_date: formData.completion_date,
+      company_name: formData.company_name,
+      work_order_number: formData.work_order_number,
+      officer_name: formData.officer_name,
+      supervisor_name: formData.supervisor_name,
+      work_scope: formData.work_scope,
+      quantity: formData.quantity,
+      materials_equipment: formData.materials_equipment,
+      worker_count: formData.worker_count ? parseInt(formData.worker_count) : null,
+      pic_signature_url: signature || null,
+    }])
+    .select()
+
+  if (error) throw error
+
+  finalCompletionId = completion[0].id
+}
+
 
   // BEFORE images
 let beforeImageData: ImageWithCaption[] = []
 if (beforeImages.length > 0) {
   beforeImageData = await uploadCompletionImages(
-    completion[0].id,
+    finalCompletionId!,
     beforeImages,
     beforeImageCaptions,
     'before'
@@ -576,7 +705,7 @@ if (beforeImages.length > 0) {
 let afterImageData: ImageWithCaption[] = []
 if (completionImages.length > 0) {
   afterImageData = await uploadCompletionImages(
-    completion[0].id,
+    finalCompletionId!,
     completionImages,
     completionImageCaptions,
     'after'
@@ -587,7 +716,7 @@ if (completionImages.length > 0) {
     let receiptImageData: ImageWithCaption[] = []
     if (receiptImages.length > 0) {
       receiptImageData = await uploadCompletionImages(
-        completion[0].id, 
+        finalCompletionId!, 
         receiptImages, 
         Array(receiptImages.length).fill('Receipt'), // Default caption
         'receipt' // Different folder
@@ -610,23 +739,26 @@ const allImages = [
         completion_images: allImages
         // We're using the same column but images have 'type' field
       })
-      .eq('id', completion[0].id)
+      .eq('id', finalCompletionId!)
 
     if (updateCompletionError) throw updateCompletionError
 
       // Update complaint status and link completion
-      const { error: updateComplaintError } = await supabase
-        .from('complaints')
-        .update({ 
-          status: 'completed',
-          completion_id: completion[0].id
-        })
-        .eq('id', complaintId)
+if (!isEditMode) {
+  const { error: updateComplaintError } = await supabase
+    .from('complaints')
+    .update({
+      status: 'completed',
+      completion_id: finalCompletionId!
+    })
+    .eq('id', finalComplaintId)
 
-      if (updateComplaintError) throw updateComplaintError
+  if (updateComplaintError) throw updateComplaintError
+}
+
 
       // Generate completion PDF
-      await generateCompletionPDF(completion[0].id)
+      await generateCompletionPDF(finalCompletionId!)
 
 // ⬇️⬇️ ADD THIS CLEANUP CODE ⬇️⬇️
 // Cleanup completion draft after successful submission
@@ -692,13 +824,27 @@ if (companyIdFromUrl) {
     }
   }
 
-  if (!complaintId) {
-    return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="text-lg text-gray-600">No complaint selected</div>
-      </div>
-    )
-  }
+const finalComplaintIdForRender = complaintId || resolvedComplaintId
+
+// ✅ If creating a NEW completion, complaintId is required
+if (!isEditMode && !finalComplaintIdForRender) {
+  return (
+    <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+      <div className="text-lg text-gray-600">No complaint selected</div>
+    </div>
+  )
+}
+
+// ✅ If editing completion, allow loading first
+if (isEditMode && !resolvedComplaintId) {
+  return (
+    <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+      <div className="text-lg text-gray-600">Loading completion...</div>
+    </div>
+  )
+}
+
+
 
   return (
     <div className="min-h-screen bg-gray-50 py-8">

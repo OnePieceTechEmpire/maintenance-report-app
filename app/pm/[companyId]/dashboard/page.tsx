@@ -598,6 +598,19 @@ const viewReceipts = async (completionId: string) => {
               PDF Aduan
             </button>
 
+            {/* ✏️ Edit Complaint */}
+<button
+  onClick={() => {
+    router.push(`/complaints/edit/${complaint.id}?companyId=${companyId}`)
+
+
+    setOpenDropdown(null)
+  }}
+  className="block w-full px-4 py-2 text-sm text-blue-600 hover:bg-blue-50 text-left"
+>
+  Edit Aduan
+</button>
+
             {/* PDF Penyelesaian */}
 {isCompleted && complaint.completion_id && (
   <button
@@ -614,6 +627,19 @@ const viewReceipts = async (completionId: string) => {
               </button>
             )}
 
+                        {isCompleted && complaint.completion_id && (
+  <button
+    onClick={() => {
+      router.push(`/completions/new?completionId=${complaint.completion_id}&companyId=${companyId}`)
+
+      setOpenDropdown(null)
+    }}
+    className="block w-full px-4 py-2 text-sm text-blue-600 hover:bg-blue-50 text-left"
+  >
+    Edit Penyelesaian
+  </button>
+)}
+
             {/* Lihat Resit */}
             {isCompleted && (
               <button
@@ -626,6 +652,9 @@ const viewReceipts = async (completionId: string) => {
                 Lihat Resit
               </button>
             )}
+
+
+
 
             {receiptViewerOpen && (
   <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50 p-4">
