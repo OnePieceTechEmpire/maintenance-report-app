@@ -220,15 +220,15 @@ async function addHeader(
   })
 
   // Subtext – date line just below title
-  const subText = `Dijana pada: ${new Date().toLocaleDateString('ms-MY')}`
-  const subTextWidth = font.widthOfTextAtSize(subText, 10)
-  page.drawText(subText, {
-    x: (width - subTextWidth) / 2,
-    y: y - 58,
-    size: 10,
-    font,
-    color: rgb(0.92, 0.92, 0.95),
-  })
+  // const subText = `Dijana pada: ${new Date().toLocaleDateString('ms-MY')}`
+  // const subTextWidth = font.widthOfTextAtSize(subText, 10)
+  // page.drawText(subText, {
+    // x: (width - subTextWidth) / 2,
+    // y: y - 58,
+    // size: 10,
+    // font,
+    // color: rgb(0.92, 0.92, 0.95),
+  // })
 
   // Company name (if provided)
 if (companyName) {
@@ -303,7 +303,11 @@ function addComplaintDetails(page: PDFPage, y: number, complaint: any, font: any
     { label: 'Nama Pengadu', value: complaint.reporter_name },
     { label: 'No. Telefon Pengadu', value: complaint.reporter_phone },
     { label: 'Dilaporkan Oleh', value: complaint.profiles?.full_name || 'N/A' },
-    { label: 'Tarikh Laporan', value: new Date(complaint.created_at).toLocaleDateString('ms-MY') },
+    {
+  label: 'Tarikh Laporan',
+  value: new Date(complaint.report_date || complaint.created_at).toLocaleDateString('ms-MY')
+},
+
     { label: 'Status', value: complaint.status.toUpperCase() },
   ]
 

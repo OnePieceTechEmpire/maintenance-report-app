@@ -20,6 +20,7 @@ type PMComplaint = {
   incident_date: string
   status: ComplaintStatus
   created_at: string
+    report_date?: string | null
 
   pdf_url?: string | null            // ✅ ADD THIS
   image_urls?: any[] | null          // ✅ ADD THIS
@@ -203,6 +204,7 @@ const enriched: PMComplaint[] = (complaintsData || []).map((c: any) => {
     incident_date: c.incident_date,
     status: c.status,
     created_at: c.created_at,
+      report_date: c.report_date ?? null, // ✅ ADD
 
     // ⭐ ADD THESE TWO
     pdf_url: c.pdf_url ?? null,
@@ -500,7 +502,9 @@ const viewReceipts = async (completionId: string) => {
           </tr>
         ) : (
           filteredComplaints.map((complaint: PMComplaint) => {
-            const created = new Date(complaint.created_at)
+            const reportDate = complaint.report_date
+  ? new Date(complaint.report_date)
+  : new Date(complaint.created_at)
             const isCompleted = complaint.status === 'completed'
             const isPending = complaint.status === 'pending'
             const hasDraft = complaint.hasCompletionDraft
@@ -528,7 +532,7 @@ const viewReceipts = async (completionId: string) => {
             return (
               <tr key={complaint.id} className="hover:bg-gray-50">
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                  {created.toLocaleDateString('ms-MY')}
+                  {reportDate.toLocaleDateString('ms-MY', { timeZone: 'Asia/Kuala_Lumpur' })}
                 </td>
 
                 <td className="px-4 py-3 text-xs sm:text-sm text-gray-900 min-w-[140px]">

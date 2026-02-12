@@ -37,6 +37,9 @@ const [currentDraftId, setCurrentDraftId] = useState<string | null>(null)
 const [imageCaptions, setImageCaptions] = useState<string[]>([])
 // Inside your ComplaintForm component, add:
 const searchParams = useSearchParams()
+const getMYDateString = () =>
+  new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kuala_Lumpur" }) // YYYY-MM-DD
+
 
 const debugMode = searchParams.get('debug') === 'true'
 const draftId = searchParams.get('draftId')
@@ -181,29 +184,48 @@ if (images.length > 0) {
     }
 
     // 6) UPDATE EXISTING DRAFT
-    if (isEditingDraft && currentDraftId) {
-      const { error } = await supabase
-        .from("complaint_drafts")
-        .update({
-          company_id: finalCompanyId,
-          form_data: draftData.form_data,
-          uploaded_images: draftData.uploaded_images,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", currentDraftId)
-        .eq("user_id", user.id)
+// 6) UPDATE EXISTING DRAFT
+if (isEditingDraft && currentDraftId) {
+  // fetch existing report_date (keep it locked)
+  const { data: existingDraft, error: fetchErr } = await supabase
+    .from("complaint_drafts")
+    .select("report_date")
+    .eq("id", currentDraftId)
+    .eq("user_id", user.id)
+    .single()
 
-      if (error) throw error
+  if (fetchErr) throw fetchErr
 
-      alert("Draf berjaya dikemas kini!")
-      return
-    }
+  const lockedReportDate = existingDraft?.report_date ?? getMYDateString()
+
+  const { error } = await supabase
+    .from("complaint_drafts")
+    .update({
+      company_id: finalCompanyId,
+      form_data: draftData.form_data,
+      uploaded_images: draftData.uploaded_images,
+      report_date: lockedReportDate, // ✅ keep
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", currentDraftId)
+    .eq("user_id", user.id)
+
+  if (error) throw error
+
+  alert("Draf berjaya dikemas kini!")
+  return
+}
+
 
     // 7) CREATE NEW DRAFT
-    const { data, error } = await supabase
-      .from("complaint_drafts")
-      .insert([draftData])
-      .select()
+const { data, error } = await supabase
+  .from("complaint_drafts")
+  .insert([{
+    ...draftData,
+    report_date: getMYDateString(), // ✅ lock at first draft time
+  }])
+  .select()
+
 
     if (error) throw error
 
@@ -465,7 +487,25 @@ const handleSubmit = async (e: React.FormEvent) => {
     const targetCompanyId = companyIdFromUrl || profile?.company_id
     if (!targetCompanyId) throw new Error('No company')
 
+      let reportDateToUse = getMYDateString()
+
+// If coming from draft, use the draft's locked report_date
+if (isEditingDraft && currentDraftId) {
+  const { data: draftRow, error: draftErr } = await supabase
+    .from("complaint_drafts")
+    .select("report_date")
+    .eq("id", currentDraftId)
+    .eq("user_id", user.id)
+    .single()
+
+  if (draftErr) throw draftErr
+  reportDateToUse = draftRow?.report_date ?? reportDateToUse
+}
+
+
     let finalComplaintId = complaintIdFromURL
+
+    
 
     // ✏️ EDIT MODE
     if (isEditMode && complaintIdFromURL) {
@@ -474,6 +514,7 @@ const handleSubmit = async (e: React.FormEvent) => {
         .update({
           ...formData,
           status: 'pending',
+            report_date: reportDateToUse, // ✅ add
           updated_at: new Date().toISOString()
         })
         .eq('id', complaintIdFromURL)
@@ -492,7 +533,8 @@ const handleSubmit = async (e: React.FormEvent) => {
           ...formData,
           submitted_by: user.id,
           company_id: targetCompanyId,
-          status: 'pending'
+          status: 'pending',
+            report_date: reportDateToUse, // ✅ add
         }])
         .select()
         .single()
@@ -622,7 +664,7 @@ if (draft?.uploaded_images && draft.uploaded_images.length > 0) {
     alert('Failed to submit complaint')
   } finally {
     setLoading(false)
-    setShowOverlay(true)
+    setShowOverlay(false)
   }
 }
 
